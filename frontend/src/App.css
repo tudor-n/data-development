@@ -1,0 +1,133 @@
+/* ── App Layout ── */
+.app-page {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: linear-gradient(180deg, #0a0f1a 0%, #111827 100%);
+  overflow: hidden;
+}
+
+.app-header {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 24px;
+  flex-shrink: 0;
+}
+
+/* ── Loading ── */
+.loading-indicator {
+  margin-top: 16px;
+  color: #3b82f6;
+  font-size: 15px;
+  font-weight: 600;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ── Preview Page ── */
+.preview-page {
+  align-items: stretch;
+  padding: 0;
+}
+
+.preview-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+  background: rgba(13, 21, 38, 0.85);
+  backdrop-filter: blur(8px);
+}
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.back-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.preview-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: #e2e8f0;
+  margin: 0;
+  letter-spacing: -0.2px;
+}
+
+.preview-meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+/* ── Main Body: 80/20 split ── */
+.preview-body {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.preview-table-area {
+  flex: 0 0 calc(80% - 8px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.preview-sidebar-area {
+  flex: 0 0 calc(20% - 8px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .preview-body {
+    flex-direction: column;
+  }
+
+  .preview-table-area,
+  .preview-sidebar-area {
+    flex: none;
+    width: 100%;
+  }
+
+  .preview-sidebar-area {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+}

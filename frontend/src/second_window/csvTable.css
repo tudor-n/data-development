@@ -1,0 +1,120 @@
+/* ── CSV Table Card ── */
+.csv-table-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+    background: linear-gradient(180deg, #0d1526 0%, #111b2e 100%);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    padding: 16px;
+}
+
+.csv-table-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #e2e8f0;
+    margin: 0 0 12px 0;
+    flex-shrink: 0;
+}
+
+.csv-table-scroll {
+    flex: 1;
+    overflow: auto;
+    min-height: 0;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* ── Table ── */
+.csv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    color: #cbd5e1;
+}
+
+.csv-th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #141e33;
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid rgba(59, 130, 246, 0.25);
+    white-space: nowrap;
+}
+
+.csv-th-idx {
+    width: 42px;
+    text-align: center;
+    color: #64748b;
+}
+
+.csv-tr {
+    transition: background 120ms ease;
+}
+
+.csv-tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.csv-tr:hover {
+    background: rgba(59, 130, 246, 0.06);
+}
+
+.csv-td {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.csv-td-idx {
+    text-align: center;
+    color: #475569;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.csv-cell-badge {
+    font-size: 9px;
+    margin-left: 6px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* ── Empty state ── */
+.csv-table-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    padding: 32px;
+    gap: 6px;
+}
+
+.csv-table-empty-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+.csv-table-empty-sub {
+    font-size: 13px;
+}

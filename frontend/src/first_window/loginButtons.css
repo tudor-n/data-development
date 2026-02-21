@@ -1,0 +1,38 @@
+/* Simple modern styles for login / signup buttons */
+.lb-container {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+}
+
+.lb-btn {
+  font-family: inherit;
+  font-weight: 700;
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, opacity 120ms ease;
+  min-width: 110px;
+}
+
+.lb-login {
+  background: transparent;
+  color: #e6eefc;
+  border: 2px solid rgba(255,255,255,0.08);
+  box-shadow: 0 6px 16px rgba(2,8,23,0.35) inset;
+}
+.lb-login:hover { transform: translateY(-2px); }
+
+.lb-signup {
+  background: linear-gradient(90deg,#1ea0ff,#0b7be6);
+  color: white;
+  box-shadow: 0 8px 24px rgba(11, 123, 230, 0.28);
+}
+.lb-signup:hover { transform: translateY(-2px); }
+
+@media (max-width: 480px) {
+  .lb-container { gap: 8px; }
+  .lb-btn { padding: 10px 14px; min-width: 90px; border-radius: 8px; }
+}

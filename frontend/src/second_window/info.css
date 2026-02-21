@@ -1,0 +1,185 @@
+/* ── Info Panel ── */
+.info-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+/* Scrollbar */
+.info-panel::-webkit-scrollbar {
+    width: 4px;
+}
+
+.info-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.info-panel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+}
+
+.info-card {
+    background: linear-gradient(180deg, #0d1526 0%, #111b2e 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 14px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.info-card-center {
+    text-align: center;
+}
+
+.info-card-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin: 0 0 10px 0;
+}
+
+/* ── Meta Grid ── */
+.info-meta-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.info-meta-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.info-meta-label {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.info-meta-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Score Ring ── */
+.info-score-ring-wrap {
+    position: relative;
+    width: 90px;
+    height: 90px;
+    margin: 8px auto 4px;
+}
+
+.info-score-ring {
+    width: 100%;
+    height: 100%;
+}
+
+.info-score-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 800;
+}
+
+.info-no-data {
+    color: #475569;
+    font-size: 13px;
+    padding: 12px 0;
+}
+
+/* ── Category Bars ── */
+.info-category-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.info-category-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.info-category-name {
+    font-size: 11px;
+    color: #94a3b8;
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.info-bar-track {
+    flex: 1;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.info-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.info-category-val {
+    font-size: 12px;
+    font-weight: 700;
+    min-width: 28px;
+    text-align: right;
+}
+
+/* ── Issues Badges ── */
+.info-issues-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.info-issue-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+}
+
+.info-badge-error {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.info-badge-warning {
+    background: rgba(245, 158, 11, 0.12);
+    color: #f59e0b;
+}
+
+.info-badge-info {
+    background: rgba(6, 182, 212, 0.12);
+    color: #06b6d4;
+}
+
+/* ── Summary Text ── */
+.info-summary-text {
+    font-size: 12px;
+    line-height: 1.6;
+    color: #94a3b8;
+    margin: 0;
+}
