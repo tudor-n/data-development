@@ -1,10 +1,10 @@
 /* ── CSV Table Card ── */
 .csv-table-card {
-    flex: 1;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
+    height: 100%; /* Force it to respect parent boundaries */
+    width: 100%;
+    overflow: hidden; /* Contain the inner scroll */
     background: linear-gradient(180deg, #0d1526 0%, #111b2e 100%);
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -25,7 +25,7 @@
 
 .csv-table-scroll {
     flex: 1;
-    overflow: auto;
+    overflow: auto; /* Adds internal scrollbars ONLY here */
     min-height: 0;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.04);
@@ -41,7 +41,7 @@
 
 .csv-th {
     position: sticky;
-    top: 0;
+    top: 0; /* Keeps headers visible while scrolling down */
     z-index: 2;
     background: #141e33;
     padding: 8px 10px;

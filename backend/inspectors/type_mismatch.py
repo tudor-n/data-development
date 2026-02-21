@@ -27,7 +27,9 @@ class TypeMismatchInspector(BaseInspector):
         if "email" in col_name_lower: return "email"
         if "phone" in col_name_lower: return "phone"
         if "name" in col_name_lower or "first" in col_name_lower or "last" in col_name_lower: return "name"
-        if "id" in col_name_lower or "age" in col_name_lower or "salary" in col_name_lower: return "numeric"
+        
+        # FIX 1: Removed 'id' from here because IDs are often alphanumeric (like 'HR-001')
+        if "age" in col_name_lower or "salary" in col_name_lower: return "numeric"
 
         numeric_convert = pd.to_numeric(series, errors='coerce')
         if numeric_convert.notna().mean() > 0.8:
@@ -55,7 +57,7 @@ class TypeMismatchInspector(BaseInspector):
                 
                 issues.append(Issue(
                     inspector_name=self.name,
-                    category="format", # <--- FIXED FROM "schema" TO PASS PYDANTIC VALIDATION
+                    category="format",
                     column=[col],
                     severity="info",
                     count=1,
@@ -87,8 +89,7 @@ class TypeMismatchInspector(BaseInspector):
             mismatch_count = mismatch_mask.sum()
 
             if mismatch_count > 0:
-                # Get specific affected cells (cap at 100 for UI performance)
-                mismatch_indexes = df[mismatch_mask].index.tolist()[:100]
+                mismatch_indexes = df[mismatch_mask].index.tolist()
                 affected_cells = [AffectedCell(row=int(idx), column=col) for idx in mismatch_indexes]
 
                 sample_df = df[mismatch_mask].head(3)
@@ -98,16 +99,16 @@ class TypeMismatchInspector(BaseInspector):
                     inspector_name=self.name,
                     category=self.category,
                     column=[col],
-                    severity="critical" if expected_type in ["email", "numeric", "phone"] else "warning",
+                    # FIX 3: Added 'name' to the critical severity list!
+                    severity="critical" if expected_type in ["email", "numeric", "phone", "name"] else "warning",
                     count=int(mismatch_count),
                     description=error_desc,
                     suggestion=f"Review these rows to ensure they match the expected '{expected_type}' format.",
                     sample_rows=samples,
-                    affected_cells=affected_cells # <--- ADDED CELL TRACKING
+                    affected_cells=affected_cells 
                 )
                 issues.append(issue)
 
-        # Apply the new column names back to the dataframe
         df.columns = new_column_names
 
         return issues

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { FileJson } from 'lucide-react';
 import './csvTable.css';
 
@@ -16,43 +16,42 @@ const SEVERITY_TEXT = {
     info: '#06b6d4',
 };
 
-function CsvTable({ csvRows, headers, issues = [] }) {
+function CsvTable({ csvRows, headers, issues = [], onCellEdit, focusedRow }) {
+    // Reference object to store all our HTML rows for auto-scrolling
+    const rowRefs = useRef({});
+
+    // Watch for changes to focusedRow and trigger scroll
+    useEffect(() => {
+        if (focusedRow !== null && rowRefs.current[focusedRow]) {
+            rowRefs.current[focusedRow].scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center' 
+            });
+        }
+    }, [focusedRow]);
+
     if (!csvRows || csvRows.length === 0) {
         return (
             <div className="csv-table-card">
                 <h3 className="csv-table-heading">
-                    <FileJson size={18} />
-                    Dataset Preview
+                    <FileJson size={18} /> Dataset Editor
                 </h3>
                 <div className="csv-table-empty">
                     <div className="csv-table-empty-title">No data loaded</div>
-                    <div className="csv-table-empty-sub">Upload a CSV file to see the preview.</div>
                 </div>
             </div>
         );
     }
 
-    // Build a lookup: { "col::rowIdx" => severity }
+    // Build a lookup map for highlighting specific cells
     const cellSeverityMap = {};
     if (issues.length > 0) {
         for (const issue of issues) {
-            // Support affected_cells format from backend: [{row, column}]
             if (issue.affected_cells && issue.affected_cells.length > 0) {
                 for (const cell of issue.affected_cells) {
                     const key = `${cell.column}::${cell.row}`;
                     if (!cellSeverityMap[key] || severityRank(issue.severity) > severityRank(cellSeverityMap[key])) {
                         cellSeverityMap[key] = issue.severity;
-                    }
-                }
-            }
-            // Fallback: column list + row_indices (legacy)
-            else if (issue.column && issue.row_indices) {
-                for (const col of issue.column) {
-                    for (const rowIdx of issue.row_indices) {
-                        const key = `${col}::${rowIdx}`;
-                        if (!cellSeverityMap[key] || severityRank(issue.severity) > severityRank(cellSeverityMap[key])) {
-                            cellSeverityMap[key] = issue.severity;
-                        }
                     }
                 }
             }
@@ -62,8 +61,7 @@ function CsvTable({ csvRows, headers, issues = [] }) {
     return (
         <div className="csv-table-card">
             <h3 className="csv-table-heading">
-                <FileJson size={18} />
-                Dataset Preview ({csvRows.length} rows)
+                <FileJson size={18} /> Dataset Editor ({csvRows.length} rows)
             </h3>
             <div className="csv-table-scroll">
                 <table className="csv-table">
@@ -76,8 +74,13 @@ function CsvTable({ csvRows, headers, issues = [] }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {csvRows.slice(0, 200).map((row, idx) => (
-                            <tr key={idx} className="csv-tr">
+                        {csvRows.map((row, idx) => (
+                            <tr 
+                                key={idx} 
+                                className="csv-tr"
+                                ref={(el) => (rowRefs.current[idx] = el)} 
+                                style={focusedRow === idx ? { outline: '2px solid #3b82f6', outlineOffset: '-2px', backgroundColor: 'rgba(59, 130, 246, 0.1)' } : {}} 
+                            >
                                 <td className="csv-td csv-td-idx">{idx + 1}</td>
                                 {headers.map((col, vidx) => {
                                     const severity = cellSeverityMap[`${col}::${idx}`] || null;
@@ -87,12 +90,27 @@ function CsvTable({ csvRows, headers, issues = [] }) {
                                             className="csv-td"
                                             style={severity ? { background: SEVERITY_COLORS[severity] } : undefined}
                                         >
-                                            <span className="csv-cell-text">{row[col] || '—'}</span>
-                                            {severity && (
-                                                <span className="csv-cell-badge" style={{ color: SEVERITY_TEXT[severity] }}>
-                                                    {severity}
-                                                </span>
-                                            )}
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                <input 
+                                                    type="text"
+                                                    value={row[col] || ''}
+                                                    onChange={(e) => onCellEdit && onCellEdit(idx, col, e.target.value)}
+                                                    style={{
+                                                        background: 'transparent',
+                                                        border: 'none',
+                                                        color: 'inherit',
+                                                        width: '100%',
+                                                        outline: 'none',
+                                                        fontSize: 'inherit',
+                                                        fontFamily: 'inherit'
+                                                    }}
+                                                />
+                                                {severity && (
+                                                    <span className="csv-cell-badge" style={{ color: SEVERITY_TEXT[severity], flexShrink: 0 }}>
+                                                        {severity}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                     );
                                 })}
@@ -107,7 +125,6 @@ function CsvTable({ csvRows, headers, issues = [] }) {
 
 function severityRank(s) {
     if (s === 'critical') return 4;
-    if (s === 'error') return 3;
     if (s === 'warning') return 2;
     if (s === 'info') return 1;
     return 0;

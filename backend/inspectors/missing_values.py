@@ -15,6 +15,9 @@ class MissingValuesInspector(BaseInspector):
     def inspect(self, df: pd.DataFrame) -> List[Issue]:
         issues = []
         total_rows = len(df)
+        
+        if total_rows == 0:
+            return issues
 
         missing_counts = df.isnull().sum()
         columns_with_nulls = missing_counts[missing_counts > 0]
@@ -22,15 +25,14 @@ class MissingValuesInspector(BaseInspector):
         for col_name, count in columns_with_nulls.items():
             missing_percentage = count / total_rows
 
-            if missing_percentage > 0.30:
+            # FIX 2: Much stricter threshold. No missing values are just "info" anymore.
+            if missing_percentage > 0.20:
                 severity = "critical"
-            elif missing_percentage > 0.10:
-                severity = "warning"
             else:
-                severity = "info"
+                severity = "warning"
 
             missing_mask = df[col_name].isnull()
-            missing_row_indexes = df[missing_mask].index.tolist()[:100]
+            missing_row_indexes = df[missing_mask].index.tolist()
             
             affected_cells = [
                 AffectedCell(row=int(idx), column=col_name) 

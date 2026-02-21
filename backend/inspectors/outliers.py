@@ -28,7 +28,7 @@ class OutlierDetectionInspector(BaseInspector):
             outlier_count = outlier_mask.sum()
 
             if outlier_count > 0:
-                outlier_row_indexes = df[outlier_mask].index.tolist()[:100]
+                outlier_row_indexes = df[outlier_mask].index.tolist()
                 
                 affected_cells = [
                     AffectedCell(row=int(idx), column=col) 

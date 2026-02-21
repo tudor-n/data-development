@@ -5,6 +5,7 @@
   align-items: center; /* center horizontally */
   justify-content: flex-start; /* do not center vertically */
   padding: 18px;
+  margin-top: 40px;
 }
 
 :root {
@@ -17,8 +18,8 @@
 
 .dd-box {
   width: 100%;
-  max-width: 2750px; /* ~2.5x wider than previous 1100px */
-  height: 220px;
+  max-width: 1300px; 
+  height: 420px;
   padding: 28px 36px;
   display: flex;
   flex-direction: column;
