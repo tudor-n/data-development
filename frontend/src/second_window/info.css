@@ -1,4 +1,3 @@
-/* ── Info Panel ── */
 .info-panel {
     display: flex;
     flex-direction: column;
@@ -8,7 +7,6 @@
     padding-right: 2px;
 }
 
-/* Scrollbar */
 .info-panel::-webkit-scrollbar {
     width: 4px;
 }
@@ -46,7 +44,6 @@
     margin: 0 0 10px 0;
 }
 
-/* ── Meta Grid ── */
 .info-meta-grid {
     display: flex;
     flex-direction: column;
@@ -74,7 +71,6 @@
     white-space: nowrap;
 }
 
-/* ── Score Ring ── */
 .info-score-ring-wrap {
     position: relative;
     width: 90px;
@@ -103,7 +99,6 @@
     padding: 12px 0;
 }
 
-/* ── Category Bars ── */
 .info-category-list {
     display: flex;
     flex-direction: column;
@@ -144,7 +139,24 @@
     text-align: right;
 }
 
-/* ── Issues Badges ── */
+.info-categories-dropdown {
+    overflow: hidden;
+    transition: max-height 0.4s ease-in-out, opacity 0.4s ease-in-out, margin-top 0.4s ease-in-out, padding-top 0.4s ease-in-out;
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 1px solid transparent;
+}
+
+.info-categories-dropdown.expanded {
+    max-height: 400px;
+    opacity: 1;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top-color: rgba(255,255,255,0.1);
+}
+
 .info-issues-row {
     display: flex;
     flex-wrap: wrap;
@@ -176,7 +188,6 @@
     color: #06b6d4;
 }
 
-/* ── Summary Text ── */
 .info-summary-text {
     font-size: 12px;
     line-height: 1.6;

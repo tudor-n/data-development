@@ -1,10 +1,9 @@
-/* ── CSV Table Card ── */
 .csv-table-card {
     display: flex;
     flex-direction: column;
-    height: 100%; /* Force it to respect parent boundaries */
+    height: 100%;
     width: 100%;
-    overflow: hidden; /* Contain the inner scroll */
+    overflow: hidden;
     background: linear-gradient(180deg, #0d1526 0%, #111b2e 100%);
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -25,13 +24,12 @@
 
 .csv-table-scroll {
     flex: 1;
-    overflow: auto; /* Adds internal scrollbars ONLY here */
+    overflow: auto;
     min-height: 0;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-/* ── Table ── */
 .csv-table {
     width: 100%;
     border-collapse: collapse;
@@ -41,7 +39,7 @@
 
 .csv-th {
     position: sticky;
-    top: 0; /* Keeps headers visible while scrolling down */
+    top: 0;
     z-index: 2;
     background: #141e33;
     padding: 8px 10px;
@@ -61,6 +59,12 @@
     color: #64748b;
 }
 
+.csv-th-actions {
+    width: 36px;
+    text-align: center;
+    color: #64748b;
+}
+
 .csv-tr {
     transition: background 120ms ease;
 }
@@ -74,12 +78,13 @@
 }
 
 .csv-td {
-    padding: 6px 10px;
+    padding: 4px 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    vertical-align: middle;
 }
 
 .csv-td-idx {
@@ -87,6 +92,13 @@
     color: #475569;
     font-size: 10px;
     font-weight: 600;
+}
+
+.csv-td-actions {
+    width: 36px;
+    text-align: center;
+    padding: 2px 4px;
+    vertical-align: middle;
 }
 
 .csv-cell-badge {
@@ -97,7 +109,120 @@
     letter-spacing: 0.3px;
 }
 
-/* ── Empty state ── */
+.row-action-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: center;
+}
+
+.row-accept-btn,
+.row-deny-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: opacity 0.15s;
+}
+
+.row-accept-btn {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.row-deny-btn {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.row-accept-btn:hover { background: rgba(16, 185, 129, 0.4); }
+.row-deny-btn:hover   { background: rgba(239, 68, 68, 0.4); }
+
+.cell-change-wrap {
+    min-width: 0;
+}
+
+.cell-change-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    min-width: 0;
+}
+
+.cell-change-values {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.cell-old-val {
+    font-size: 10px;
+    color: #64748b;
+    text-decoration: line-through;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60px;
+    flex-shrink: 1;
+}
+
+.cell-arrow {
+    font-size: 10px;
+    color: #475569;
+    flex-shrink: 0;
+}
+
+.cell-new-val {
+    font-size: 11px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 70px;
+    flex-shrink: 1;
+}
+
+.cell-change-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.cell-accept-btn,
+.cell-deny-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: opacity 0.15s;
+}
+
+.cell-accept-btn {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.cell-deny-btn {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.cell-accept-btn:hover { background: rgba(16, 185, 129, 0.35); }
+.cell-deny-btn:hover   { background: rgba(239, 68, 68, 0.35); }
+
 .csv-table-empty {
     flex: 1;
     display: flex;
