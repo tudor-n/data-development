@@ -1,8 +1,18 @@
 fastapi
-uvicorn
-pandas
+uvicorn[standard]
 pydantic
-google-generativeai
+pydantic-settings
 python-multipart
 python-dotenv
-pydantic-settings
+
+# Data Processing
+polars
+pandas
+openpyxl
+pyarrow
+
+# Auth
+passlib[bcrypt]
+
+# LLM
+google-generativeai

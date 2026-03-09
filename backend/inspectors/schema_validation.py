@@ -1,54 +1,61 @@
-import pandas as pd
-from typing import List
-from inspectors.base import BaseInspector
-from models.schemas import Issue
+import polars as pl
+from models.schemas import Issue, AffectedCell
+import re
 
-class SchemaValidationInspector(BaseInspector):
+EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
-    REQUIRED_COLUMNS = []
 
-    @property
-    def name(self) -> str:
-        return "Schema Validation Inspector"
-
-    @property
-    def category(self) -> str:
-        return "completeness"
-
-    def inspect(self, df: pd.DataFrame) -> List[Issue]:
+class SchemaValidationInspector:
+    def inspect(self, df: pl.DataFrame) -> list[Issue]:
         issues = []
 
-        for col in self.REQUIRED_COLUMNS:
-            if col not in df.columns:
-                issue = Issue(
-                    inspector_name=self.name,
-                    category=self.category,
-                    column=[col],
-                    severity="critical",
-                    count=0,
-                    description=f"Required column '{col}' is missing from dataset.",
-                    suggestion="Ensure this column exists before using the dataset.",
-                    sample_rows=[]
-                )
-                issues.append(issue)
+        # Check for columns that look like email but have invalid formats
+        for col_name in df.columns:
+            col_lower = col_name.lower().replace(" ", "_")
+            if any(k in col_lower for k in ("email", "mail")):
+                col = df[col_name]
+                if col.dtype != pl.Utf8:
+                    continue
+                non_null = col.drop_nulls()
+                if non_null.len() == 0:
+                    continue
 
-        suspicious_cols = [col for col in df.columns if "unnamed" in col.lower()]
+                invalid_count = 0
+                affected = []
+                indexed = df.with_row_index("__idx__")
+                for r in indexed.select("__idx__", col_name).iter_rows(named=True):
+                    v = r[col_name]
+                    if v is None:
+                        continue
+                    if not EMAIL_RE.match(str(v).strip()):
+                        invalid_count += 1
+                        if len(affected) < 100:
+                            affected.append(AffectedCell(row=int(r["__idx__"]), column=col_name, value=v))
 
-        for col in suspicious_cols:
-            affected_rows = df.index.tolist()[:300]
-            affected_cells = [{"row": int(r), "column": str(col)} for r in affected_rows]
+                if invalid_count > 0:
+                    issues.append(Issue(
+                        inspector_name="Schema Validation",
+                        severity="critical",
+                        category="accuracy",
+                        column=[col_name],
+                        description=f"Column '{col_name}' (email) has {invalid_count} invalid email address(es).",
+                        suggestion="Repair or remove invalid email addresses.",
+                        count=invalid_count,
+                        affected_cells=affected,
+                    ))
 
-            issue = Issue(
-                inspector_name=self.name,
-                category=self.category,
-                column=[col],
-                severity="warning",
-                count=int(len(df)),
-                description=f"Column '{col}' looks like an auto-generated index column.",
-                suggestion="Consider removing this column if it is not needed.",
-                sample_rows=[],
-                affected_cells=affected_cells
-            )
-            issues.append(issue)
+        # Check for empty columns
+        for col_name in df.columns:
+            if df[col_name].null_count() == df.height:
+                issues.append(Issue(
+                    inspector_name="Schema Validation",
+                    severity="info",
+                    category="completeness",
+                    column=[col_name],
+                    description=f"Column '{col_name}' is entirely empty.",
+                    suggestion="Remove this column or populate it with data.",
+                    count=df.height,
+                    affected_cells=[],
+                ))
 
         return issues

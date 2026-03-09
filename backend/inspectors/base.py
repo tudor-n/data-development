@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-import pandas as pd
+import polars as pl
 from typing import List
 from models.schemas import Issue
 
@@ -13,5 +13,5 @@ class BaseInspector(ABC):
     def category(self) -> str:
         pass
     @abstractmethod
-    def inspect(self, df: pd.DataFrame) -> List[Issue]:
+    def inspect(self, df: pl.DataFrame) -> List[Issue]:
         pass

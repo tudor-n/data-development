@@ -1,74 +1,83 @@
-import pandas as pd
-from typing import List
-from inspectors.base import BaseInspector
+import polars as pl
 from models.schemas import Issue, AffectedCell
 
-class FormatInconsistencyInspector(BaseInspector):
-    @property
-    def name(self) -> str:
-        return "Format Inconsistency Detector"
 
-    @property
-    def category(self) -> str:
-        return "format"
-
-    def inspect(self, df: pd.DataFrame) -> List[Issue]:
+class FormatInconsistencyInspector:
+    def inspect(self, df: pl.DataFrame) -> list[Issue]:
         issues = []
-        if len(df) == 0:
-            return issues
-
-        for col in df.columns:
-            valid_data = df[col].dropna()
-            if valid_data.empty:
+        for col_name in df.columns:
+            col = df[col_name]
+            if col.dtype != pl.Utf8:
                 continue
 
-            if valid_data.dtype == 'object':
-                texts = valid_data.astype(str)
-                
-                # Check 1: Hidden leading/trailing whitespace (e.g., "John " instead of "John")
-                whitespace_mask = texts.str.match(r'^\s+|\s+$')
-                whitespace_count = whitespace_mask.sum()
-                
-                if whitespace_count > 0:
-                    affected_idx = texts[whitespace_mask].index.tolist()
-                    affected_cells = [AffectedCell(row=int(idx), column=col) for idx in affected_idx]
-                    sample_rows = df.loc[affected_idx].head(3).fillna("NULL").to_dict(orient="records")
-                    
+            non_null = col.drop_nulls()
+            if non_null.len() < 2:
+                continue
+
+            # Check casing inconsistency: count lower, upper, title
+            values = non_null.to_list()
+            lower_c = sum(1 for v in values if v == v.lower() and not v == v.upper())
+            upper_c = sum(1 for v in values if v == v.upper() and not v == v.lower())
+            title_c = sum(1 for v in values if v == v.title())
+            total = lower_c + upper_c + title_c
+
+            if total > 0:
+                max_style = max(lower_c, upper_c, title_c)
+                inconsistent = total - max_style
+
+                if inconsistent > 0 and (max_style / total) < 0.95:
+                    if max_style == title_c:
+                        dominant = "Title Case"
+                    elif max_style == lower_c:
+                        dominant = "lowercase"
+                    else:
+                        dominant = "UPPERCASE"
+
+                    indexed = df.with_row_index("__idx__")
+                    affected = []
+                    for r in indexed.select("__idx__", col_name).iter_rows(named=True):
+                        v = r[col_name]
+                        if v is None:
+                            continue
+                        if dominant == "Title Case" and v != v.title():
+                            affected.append(AffectedCell(row=int(r["__idx__"]), column=col_name, value=v))
+                        elif dominant == "lowercase" and v != v.lower():
+                            affected.append(AffectedCell(row=int(r["__idx__"]), column=col_name, value=v))
+                        elif dominant == "UPPERCASE" and v != v.upper():
+                            affected.append(AffectedCell(row=int(r["__idx__"]), column=col_name, value=v))
+                        if len(affected) >= 100:
+                            break
+
                     issues.append(Issue(
-                        inspector_name=self.name,
-                        category=self.category,
-                        column=[col],
-                        severity="warning",
-                        count=int(whitespace_count),
-                        description=f"Column '{col}' has {whitespace_count} values with invisible leading or trailing spaces.",
-                        suggestion="Trim whitespace from these values to prevent matching errors downstream.",
-                        sample_rows=sample_rows,
-                        affected_cells=affected_cells
+                        inspector_name="Format Inconsistency",
+                        severity="info",
+                        category="format",
+                        column=[col_name],
+                        description=f"Column '{col_name}' has inconsistent casing. Dominant style: {dominant} ({max_style}/{total}).",
+                        suggestion=f"Standardize all values to {dominant}.",
+                        count=inconsistent,
+                        affected_cells=affected,
                     ))
 
-                # Check 2: Inconsistent Capitalization (Ignore Emails, IDs, and Ratings)
-                if col.lower() not in ['email', 'work_email', 'id', 'emp_id', 'rating', 'performance_rating']:
-                    is_lower = texts.str.islower().sum()
-                    is_upper = texts.str.isupper().sum()
-                    is_title = texts.str.istitle().sum()
-                    
-                    total_cased = is_lower + is_upper + is_title
-                    
-                    # If we have a mix of casings (not 100% uniform)
-                    if total_cased > 0:
-                        max_ratio = max(is_lower, is_upper, is_title) / total_cased
-                        # If the dominant casing is less than 95%, the column is messy
-                        if 0.1 < max_ratio < 0.95: 
-                            issues.append(Issue(
-                                inspector_name=self.name,
-                                category=self.category,
-                                column=[col],
-                                severity="info",
-                                count=int(total_cased),
-                                description=f"Column '{col}' has mixed text casing (combination of UPPER, lower, and Title case).",
-                                suggestion="Standardize the text casing (e.g., convert all to Title Case).",
-                                sample_rows=df.head(3).fillna("").to_dict(orient="records"),
-                                affected_cells=[]
-                            ))
+            # Check leading/trailing whitespace
+            ws_mask = col.is_not_null() & (col != col.str.strip_chars())
+            ws_count = ws_mask.sum()
+            if ws_count and ws_count > 0:
+                indexed = df.with_row_index("__idx__")
+                ws_rows = indexed.filter(ws_mask)
+                affected_ws = [
+                    AffectedCell(row=int(r["__idx__"]), column=col_name, value=repr(r[col_name]))
+                    for r in ws_rows.select("__idx__", col_name).iter_rows(named=True)
+                ][:100]
 
+                issues.append(Issue(
+                    inspector_name="Whitespace Issues",
+                    severity="info",
+                    category="format",
+                    column=[col_name],
+                    description=f"Column '{col_name}' has {ws_count} value(s) with leading/trailing whitespace.",
+                    suggestion="Strip whitespace from all values in this column.",
+                    count=int(ws_count),
+                    affected_cells=affected_ws,
+                ))
         return issues

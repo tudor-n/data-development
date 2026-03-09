@@ -1,6 +1,11 @@
 import React, { useRef, useState, useEffect } from 'react';
 import './dragAndDrop.css';
 
+const ACCEPTED_EXTENSIONS = /\.(csv|xlsx|xls|json|tsv)$/i;
+const ACCEPTED_MIME = ['text/csv', 'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/json', 'text/tab-separated-values', 'text/tsv'];
+
 function DragAndDrop({ onFileAccepted }) {
   const inputRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -14,20 +19,24 @@ function DragAndDrop({ onFileAccepted }) {
   const emptyDragImage = useRef(null);
 
   useEffect(() => {
-    // create a tiny transparent image to hide the browser's default drag preview
     const img = new Image();
-    // 1x1 transparent SVG data URI (widely supported)
     img.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>';
     emptyDragImage.current = img;
   }, []);
+
+  const isAccepted = (file) => {
+    if (!file) return false;
+    const nameOk = ACCEPTED_EXTENSIONS.test(file.name || '');
+    const typeOk = ACCEPTED_MIME.includes(file.type || '');
+    return nameOk || typeOk;
+  };
 
   const handleValidFile = async (f) => {
     setFileName(f.name);
     setFileError('');
     if (onFileAccepted) {
       try {
-        const csvText = await f.text();
-        onFileAccepted(csvText, f.name);
+        onFileAccepted(f, f.name);
       } catch (err) {
         setFileError('Error reading file');
         setTimeout(() => setFileError(''), 3000);
@@ -42,10 +51,10 @@ function DragAndDrop({ onFileAccepted }) {
     const files = e.dataTransfer?.files || e.target.files;
     if (files && files.length) {
       const f = files[0];
-      if (isCsv(f)) {
+      if (isAccepted(f)) {
         handleValidFile(f);
       } else {
-        setFileError('Please upload CSV files only');
+        setFileError('Please upload CSV, XLSX, JSON, or TSV files only');
         setTimeout(() => setFileError(''), 3000);
       }
     }
@@ -71,24 +80,16 @@ function DragAndDrop({ onFileAccepted }) {
     const files = e.target.files;
     if (files && files.length) {
       const f = files[0];
-      if (isCsv(f)) {
+      if (isAccepted(f)) {
         handleValidFile(f);
       } else {
-        setFileError('Please upload CSV files only');
+        setFileError('Please upload CSV, XLSX, JSON, or TSV files only');
         setTimeout(() => setFileError(''), 3000);
       }
     }
   };
 
-  const isCsv = (file) => {
-    if (!file) return false;
-    const nameOk = /\.csv$/i.test(file.name || '');
-    const typeOk = (file.type || '') === 'text/csv';
-    return nameOk || typeOk;
-  };
-
   useEffect(() => {
-    // small mount animation trigger
     const t = setTimeout(() => setMounted(true), 40);
     return () => clearTimeout(t);
   }, []);
@@ -111,21 +112,20 @@ function DragAndDrop({ onFileAccepted }) {
         </div>
 
         <div className="dd-text">
-          <div className="dd-title">{fileName ? 'File selected' : 'Drag & drop a CSV file'}</div>
-          <div className="dd-sub">{fileError ? fileError : (fileName ? fileName : 'OR CLICK TO BROWSE')}</div>
+          <div className="dd-title">{fileName ? 'File selected' : 'Drag & drop a file'}</div>
+          <div className="dd-sub">{fileError ? fileError : (fileName ? fileName : 'CSV, XLSX, JSON, TSV — OR CLICK TO BROWSE')}</div>
         </div>
 
         <input
           ref={inputRef}
           className="dd-input"
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.xlsx,.xls,.json,.tsv,text/csv,application/json,text/tab-separated-values"
           onChange={onFileChange}
         />
       </label>
 
-      {fileName && <div className="dd-footer">Selectat: {fileName}</div>}
-      {/* accessible error region */}
+      {fileName && <div className="dd-footer">Selected: {fileName}</div>}
       <div aria-live="polite" style={{ position: 'absolute', left: -9999 }}>{fileError}</div>
     </div>
   );

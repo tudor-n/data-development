@@ -1,59 +1,30 @@
-import pandas as pd
-from typing import List
-from inspectors.base import BaseInspector
+import polars as pl
 from models.schemas import Issue, AffectedCell
 
-class MissingValuesInspector(BaseInspector):
-    @property
-    def name(self) -> str:
-        return "Missing Values Detector"
 
-    @property
-    def category(self) -> str:
-        return "completeness"
-
-    def inspect(self, df: pd.DataFrame) -> List[Issue]:
+class MissingValuesInspector:
+    def inspect(self, df: pl.DataFrame) -> list[Issue]:
         issues = []
-        total_rows = len(df)
-        
-        if total_rows == 0:
-            return issues
+        for col_name in df.columns:
+            col = df[col_name]
+            null_count = col.null_count()
+            if null_count == 0:
+                continue
 
-        missing_counts = df.isnull().sum()
-        columns_with_nulls = missing_counts[missing_counts > 0]
+            null_indices = df.with_row_index("__idx__").filter(pl.col(col_name).is_null())["__idx__"].to_list()
 
-        for col_name, count in columns_with_nulls.items():
-            missing_percentage = count / total_rows
+            affected = [AffectedCell(row=int(i), column=col_name, value=None) for i in null_indices]
 
-            # FIX 2: Much stricter threshold. No missing values are just "info" anymore.
-            if missing_percentage > 0.20:
-                severity = "critical"
-            else:
-                severity = "warning"
+            severity = "critical" if null_count / df.height > 0.3 else "warning"
 
-            missing_mask = df[col_name].isnull()
-            missing_row_indexes = df[missing_mask].index.tolist()
-            
-            affected_cells = [
-                AffectedCell(row=int(idx), column=col_name) 
-                for idx in missing_row_indexes
-            ]
-
-            sample_df = df[missing_mask].head(3)
-            samples = sample_df.fillna("NULL").to_dict(orient="records")
-
-            issue = Issue(
-                inspector_name=self.name,
-                category=self.category,
-                column=[col_name],
+            issues.append(Issue(
+                inspector_name="Missing Values",
                 severity=severity,
-                count=int(count),
-                description=f"Found {count} missing values in the '{col_name}' column ({missing_percentage:.1%} of rows).",
-                suggestion="Consider dropping rows with missing values, or backfilling them with a default value.",
-                sample_rows=samples,
-                affected_cells=affected_cells
-            )
-
-            issues.append(issue)
-
+                category="completeness",
+                column=[col_name],
+                description=f"Column '{col_name}' has {null_count} missing value(s) out of {df.height} rows ({100 * null_count / df.height:.1f}%).",
+                suggestion="Fill missing values with the column median (numeric) or mode (text), or investigate why data is absent.",
+                count=null_count,
+                affected_cells=affected,
+            ))
         return issues

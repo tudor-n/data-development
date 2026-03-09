@@ -17,6 +17,7 @@ class CategoryBreakdown(BaseModel):
 class AffectedCell(BaseModel):
     row: int
     column: str
+    value: Optional[Any] = None
 
 class Issue(BaseModel):
     inspector_name: str
