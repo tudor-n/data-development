@@ -2,13 +2,15 @@ import io
 import json
 import re
 import logging
+import os
 
+from services.llm import LLMService
 import polars as pl
+import tempfile
 from fastapi import APIRouter, File, HTTPException, UploadFile, Request
 from fastapi.responses import JSONResponse, Response
 
 from services.engine import QualityEngine
-from services.llm import LLMService
 from services.autofix_engine import autofix_dataframe
 
 logger = logging.getLogger(__name__)
@@ -35,48 +37,55 @@ def _serialize_value(v):
 
 
 def _read_df(contents: bytes, filename: str) -> pl.DataFrame:
-    """Read file bytes into a Polars DataFrame supporting CSV, XLSX, XLS, JSON, TSV."""
+    """Read file bytes into a Polars DataFrame with lazy loading for big CSVs."""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "csv"
 
-    if ext in ("xlsx", "xls"):
-        import pandas as pd
-        pdf = pd.read_excel(io.BytesIO(contents))
-        df = pl.from_pandas(pdf.astype(str))
-    elif ext == "json":
-        import pandas as pd
-        data = json.loads(contents.decode("utf-8"))
-        if isinstance(data, dict):
-            # Unwrap: find first key whose value is a list of records
-            list_val = next(
-                (v for v in data.values() if isinstance(v, list)),
-                [data],
-            )
-            data = list_val
-        if isinstance(data, list):
-            pdf = pd.json_normalize(data)
-        else:
-            pdf = pd.json_normalize([data])
-        # Flatten nested values to JSON strings
-        for col in pdf.columns:
-            pdf[col] = pdf[col].apply(
-                lambda v: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
-            )
-        df = pl.from_pandas(pdf.astype(str))
-    elif ext == "tsv":
-        df = pl.read_csv(io.BytesIO(contents), separator="\t", ignore_errors=True)
-    else:  # csv (default)
-        try:
-            df = pl.read_csv(io.BytesIO(contents), encoding="utf8", ignore_errors=True)
-        except Exception:
-            text = contents.decode("latin1", errors="replace")
-            df = pl.read_csv(io.StringIO(text), ignore_errors=True)
+    # DEMO SAFETY: Write to a temporary file on disk so Polars can lazy-load
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
+        tmp.write(contents)
+        tmp_path = tmp.name
 
-    # Drop Unnamed / __ columns
-    keep = [c for c in df.columns if not re.match(r"^(Unnamed|__)", c)]
-    df = df.select(keep)
-    # Drop entirely-null columns
-    df = df[[c for c in df.columns if df[c].null_count() < df.height]]
-    return df
+    try:
+        if ext in ("xlsx", "xls"):
+            import pandas as pd
+            pdf = pd.read_excel(tmp_path)
+            df = pl.from_pandas(pdf.astype(str))
+        elif ext == "json":
+            import pandas as pd
+            # Same logic you had, just reading from the tmp_path
+            data = json.load(open(tmp_path, "r", encoding="utf-8"))
+            if isinstance(data, dict):
+                list_val = next((v for v in data.values() if isinstance(v, list)), [data])
+                data = list_val
+            pdf = pd.json_normalize(data if isinstance(data, list) else [data])
+            for col in pdf.columns:
+                pdf[col] = pdf[col].apply(
+                    lambda v: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+                )
+            df = pl.from_pandas(pdf.astype(str))
+        elif ext == "tsv":
+            # Lazy load TSV, limit to 50k rows for demo safety
+            df = pl.scan_csv(tmp_path, separator="\t", ignore_errors=True).head(50000).collect()
+        else:  # csv (default)
+            try:
+                # LAZY LOADING MAGIC: Scans the file on disk, grabs only what it needs
+                df = pl.scan_csv(tmp_path, ignore_errors=True).head(50000).collect()
+            except Exception:
+                df = pl.read_csv(tmp_path, encoding="latin1", ignore_errors=True).head(50000)
+
+        # Drop Unnamed / __ columns
+        keep = [c for c in df.columns if not re.match(r"^(Unnamed|__)", c)]
+        df = df.select(keep)
+        
+        # FIXED SYNTAX: Polars native column selection (removes the deprecated pandas syntax)
+        valid_cols = [c for c in df.columns if df[c].null_count() < df.height]
+        df = df.select(valid_cols)
+        
+        return df
+    finally:
+        # Always clean up the temp file
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 def _df_to_records(df: pl.DataFrame) -> tuple[list[str], list[dict]]:

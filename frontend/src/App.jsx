@@ -12,36 +12,44 @@ import './App.css'
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/analyze'
 
 function parseCSV(csv) {
-  const lines = []
-  let current = ''
-  let inQuotes = false
+  // 1. Normalize all Windows-style (\r\n) or old Mac (\r) line breaks to standard \n
+  const normalizedCsv = csv.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-  for (let i = 0; i < csv.length; i++) {
-    const char = csv[i]
-    const nextChar = csv[i + 1]
+  const lines = [];
+  let current = '';
+  let inQuotes = false;
+
+  // 2. Parse the normalized string
+  for (let i = 0; i < normalizedCsv.length; i++) {
+    const char = normalizedCsv[i];
+    const nextChar = normalizedCsv[i + 1];
 
     if (char === '"') {
+      // Handle escaped quotes (e.g., "")
       if (inQuotes && nextChar === '"') {
-        current += '"'
-        i++
+        current += '"';
+        i++; // Skip the next quote since we just handled it
       } else {
-        inQuotes = !inQuotes
+        // Toggle quote state
+        inQuotes = !inQuotes;
       }
     } else if (char === '\n' && !inQuotes) {
+      // End of row reached (only if we are not inside a quoted string)
       if (current.trim()) {
-        lines.push(current)
+        lines.push(current);
       }
-      current = ''
+      current = '';
     } else {
-      current += char
+      current += char;
     }
   }
 
+  // 3. Push the very last line if it exists
   if (current.trim()) {
-    lines.push(current)
+    lines.push(current);
   }
 
-  return lines
+  return lines;
 }
 
 function parseCSVLine(line) {

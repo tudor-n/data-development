@@ -1,0 +1,44 @@
+# ── Stage 1: build deps ───────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+# Install build tools for packages with C extensions (bcrypt, psycopg2)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt .
+RUN pip install --upgrade pip \
+    && pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+# 1. FIX: Set the working directory directly to the backend folder!
+WORKDIR /app/backend
+
+# Runtime system deps only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+# 2. FIX: Copy application code DIRECTLY into the current working directory
+COPY backend/ .
+
+# Non-root user for security
+RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app/backend
+USER appuser
+
+EXPOSE 8000
+
+# 3. FIX: Changed endpoint to "/" because main.py uses @app.get("/")
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+# 4. FIX: Run uvicorn natively without the "backend." prefix
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

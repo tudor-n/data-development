@@ -1,152 +1,175 @@
-import datetime
+"""
+Auth router — /auth/register, /auth/login, /auth/refresh, /auth/logout, /auth/me
+Refresh token is stored as an HttpOnly cookie (not in the response body).
+"""
+from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from passlib.context import CryptContext
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth.db import get_db, init_db
+from auth import service
+from auth.schemas import AuthResponse, LoginRequest, RegisterRequest, TokenResponse, UserOut
+from auth.service import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
+from db.database import get_db
+from db.models import User
 
-router = APIRouter()
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+router = APIRouter(prefix="/auth", tags=["auth"])
+bearer_scheme = HTTPBearer(auto_error=False)
 
-# Initialise DB tables on module load
-init_db()
-
-
-# ── Pydantic models ──────────────────────────────────────────────
-
-class AuthPayload(BaseModel):
-    username: str
-    password: str
-
-
-class FileHistoryPayload(BaseModel):
-    username: str
-    filename: str
-    content: str
-
-
-class SearchPayload(BaseModel):
-    query: str
+COOKIE_NAME = "clarifi_refresh"
+COOKIE_OPTIONS = {
+    "httponly": True,
+    "secure": True,       # HTTPS only in production; set False for local dev via env
+    "samesite": "lax",
+    "max_age": REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+    "path": "/auth",      # Scope cookie to auth routes only
+}
 
 
-# ── Auth endpoints ───────────────────────────────────────────────
+def _set_refresh_cookie(response: Response, raw_token: str) -> None:
+    import os
+    secure = os.getenv("COOKIE_SECURE", "true").lower() != "false"
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=raw_token,
+        **{**COOKIE_OPTIONS, "secure": secure},
+    )
 
-@router.post("/register")
-@router.post("/signup")
-def register(payload: AuthPayload):
-    username = payload.username.strip()
-    password = payload.password.strip()
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="Username and password are required.")
-    pw_hash = _pwd_ctx.hash(password)
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=COOKIE_NAME, path="/auth")
+
+
+# ─── Dependencies ────────────────────────────────────────────────────────────
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
-        with get_db() as con:
-            con.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (username, pw_hash),
-            )
-            con.commit()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Username already exists.")
-    return {"message": "User created successfully.", "username": username}
-
-
-@router.post("/login")
-def login(payload: AuthPayload):
-    username = payload.username.strip()
-    password = payload.password.strip()
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="Username and password are required.")
-    with get_db() as con:
-        row = con.execute(
-            "SELECT username, password_hash FROM users WHERE username = ?",
-            (username,),
-        ).fetchone()
-    if not row or not _pwd_ctx.verify(password, row["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
-    return {"message": "Login successful.", "username": row["username"]}
-
-
-# ── File history endpoints ───────────────────────────────────────
-
-@router.post("/history")
-def save_file_history(payload: FileHistoryPayload):
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    with get_db() as con:
-        # Upsert
-        con.execute(
-            """
-            INSERT INTO file_history (username, filename, content, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(username, filename) DO UPDATE SET
-                content    = excluded.content,
-                updated_at = excluded.updated_at
-            """,
-            (payload.username, payload.filename, payload.content, now),
+        payload = service.decode_access_token(credentials.credentials)
+        user = await service.get_user_by_id(db, payload["sub"])
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        return user
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        # Enforce max 5 entries per user (delete oldest)
-        con.execute(
-            """
-            DELETE FROM file_history
-            WHERE username = ? AND id NOT IN (
-                SELECT id FROM file_history
-                WHERE username = ?
-                ORDER BY updated_at DESC
-                LIMIT 5
-            )
-            """,
-            (payload.username, payload.username),
+
+
+# ─── Routes ──────────────────────────────────────────────────────────────────
+
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        user = await service.create_user(db, body.email, body.username, body.password)
+    except IntegrityError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email or username already registered",
         )
-        con.commit()
-    return {"message": "File history updated."}
+
+    access_token = service.create_access_token(user.id, user.email)
+    raw_refresh = await service.create_refresh_token(
+        db,
+        user.id,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=request.client.host if request.client else None,
+    )
+    _set_refresh_cookie(response, raw_refresh)
+
+    return AuthResponse(
+        user=UserOut.model_validate(user),
+        access_token=access_token,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
 
 
-@router.get("/history/{username}")
-def get_file_history(username: str):
-    with get_db() as con:
-        rows = con.execute(
-            """
-            SELECT id, filename, content, updated_at
-            FROM file_history
-            WHERE username = ?
-            ORDER BY updated_at DESC
-            """,
-            (username,),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-# ── Search history endpoints ─────────────────────────────────────
-
-@router.get("/search-history")
-def get_search_history():
-    with get_db() as con:
-        rows = con.execute(
-            "SELECT id, query, created_at FROM search_history ORDER BY created_at DESC LIMIT 20"
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-@router.post("/search-history")
-def add_search_history(payload: SearchPayload):
-    q = payload.query.strip()
-    if not q:
-        return {"ok": False}
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    with get_db() as con:
-        con.execute(
-            "INSERT INTO search_history (query, created_at) VALUES (?, ?) "
-            "ON CONFLICT(query) DO UPDATE SET created_at = excluded.created_at",
-            (q, now),
+@router.post("/login", response_model=AuthResponse)
+async def login(
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    user = await service.authenticate_user(db, body.email, body.password)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
         )
-        con.commit()
-    return {"ok": True}
+
+    access_token = service.create_access_token(user.id, user.email)
+    raw_refresh = await service.create_refresh_token(
+        db,
+        user.id,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=request.client.host if request.client else None,
+    )
+    _set_refresh_cookie(response, raw_refresh)
+
+    return AuthResponse(
+        user=UserOut.model_validate(user),
+        access_token=access_token,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
 
 
-@router.delete("/search-history/{item_id}")
-def delete_search_history(item_id: int):
-    with get_db() as con:
-        con.execute("DELETE FROM search_history WHERE id = ?", (item_id,))
-        con.commit()
-    return {"ok": True}
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    refresh_token_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+):
+    raw = refresh_token_cookie
+    if raw is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token")
+
+    try:
+        new_raw, user = await service.rotate_refresh_token(
+            db,
+            raw,
+            user_agent=request.headers.get("user-agent"),
+            ip_address=request.client.host if request.client else None,
+        )
+    except ValueError as e:
+        _clear_refresh_cookie(response)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+
+    access_token = service.create_access_token(user.id, user.email)
+    _set_refresh_cookie(response, new_raw)
+
+    return TokenResponse(
+        access_token=access_token,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    refresh_token_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+):
+    if refresh_token_cookie:
+        await service.revoke_refresh_token(db, refresh_token_cookie)
+    _clear_refresh_cookie(response)
+
+
+@router.get("/me", response_model=UserOut)
+async def get_me(current_user: User = Depends(get_current_user)):
+    return UserOut.model_validate(current_user)

@@ -20,6 +20,7 @@ load_dotenv()
 
 api_key = os.getenv("GEMINI_API_KEY")
 
+
 if not api_key:
     logger.critical("GEMINI_API_KEY is missing. Application cannot start.")
     sys.exit(1)

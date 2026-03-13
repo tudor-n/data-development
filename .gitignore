@@ -1,0 +1,58 @@
+# ─── SECRETS & ENV FILES (CRITICAL) ───────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── FRONTEND (React / Vite / Node) ───────────────
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── BACKEND (Python / FastAPI) ───────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+.env_python/
+
+# ─── DOCKER & DATABASE ────────────────────────────
+# Ignore local database mounts if you ever map them to a local folder
+postgres_data/
+pgdata/
+*.sql.gz
+*.sqlite3
+
+# ─── IDE & OS FILES ───────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
