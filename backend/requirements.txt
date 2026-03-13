@@ -15,4 +15,4 @@ pyarrow
 passlib[bcrypt]
 
 # LLM
-google-generativeai
+google-genai
