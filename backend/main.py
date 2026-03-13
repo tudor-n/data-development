@@ -58,7 +58,7 @@ if settings.is_production:
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(history_router, prefix="/api/v1")
-# app.include_router(api_router, prefix="/api/v1")  # your existing routes
+app.include_router(api_router, prefix="/api/v1")  # your existing routes
 
 
 # ─── Health check ─────────────────────────────────────────────────────────────

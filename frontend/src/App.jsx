@@ -9,65 +9,40 @@ import InfoPanel from './second_window/info'
 import SearchBar from './second_window/SearchBar'
 import './App.css'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/analyze'
+const API_BASE = '/api/v1'
 
 function parseCSV(csv) {
-  // 1. Normalize all Windows-style (\r\n) or old Mac (\r) line breaks to standard \n
-  const normalizedCsv = csv.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-  const lines = [];
-  let current = '';
-  let inQuotes = false;
-
-  // 2. Parse the normalized string
-  for (let i = 0; i < normalizedCsv.length; i++) {
-    const char = normalizedCsv[i];
-    const nextChar = normalizedCsv[i + 1];
-
+  const normalized = csv.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized[i]
+    const next = normalized[i + 1]
     if (char === '"') {
-      // Handle escaped quotes (e.g., "")
-      if (inQuotes && nextChar === '"') {
-        current += '"';
-        i++; // Skip the next quote since we just handled it
-      } else {
-        // Toggle quote state
-        inQuotes = !inQuotes;
-      }
+      if (inQuotes && next === '"') { current += '"'; i++ }
+      else inQuotes = !inQuotes
     } else if (char === '\n' && !inQuotes) {
-      // End of row reached (only if we are not inside a quoted string)
-      if (current.trim()) {
-        lines.push(current);
-      }
-      current = '';
+      if (current.trim()) lines.push(current)
+      current = ''
     } else {
-      current += char;
+      current += char
     }
   }
-
-  // 3. Push the very last line if it exists
-  if (current.trim()) {
-    lines.push(current);
-  }
-
-  return lines;
+  if (current.trim()) lines.push(current)
+  return lines
 }
 
 function parseCSVLine(line) {
   const fields = []
   let current = ''
   let inQuotes = false
-
   for (let i = 0; i < line.length; i++) {
     const char = line[i]
-    const nextChar = line[i + 1]
-
+    const next = line[i + 1]
     if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        current += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
+      if (inQuotes && next === '"') { current += '"'; i++ }
+      else inQuotes = !inQuotes
     } else if (char === ',' && !inQuotes) {
       fields.push(current)
       current = ''
@@ -75,7 +50,6 @@ function parseCSVLine(line) {
       current += char
     }
   }
-
   fields.push(current)
   return fields.map(f => f.replace(/^"|"$/g, '').trim())
 }
@@ -84,8 +58,7 @@ function encodeCSVLine(fields) {
   return fields.map(f => {
     const s = String(f || '')
     return s.includes(',') || s.includes('"') || s.includes('\n')
-      ? `"${s.replace(/"/g, '""')}"`
-      : s
+      ? `"${s.replace(/"/g, '""')}"` : s
   }).join(',')
 }
 
@@ -106,51 +79,85 @@ function App() {
   const [isAnimatingScore, setIsAnimatingScore] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
-  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('currentUser'))
-  const [authModalMode, setAuthModalMode] = useState(null) // 'login', 'signup', or null
-  const [userHistory, setUserHistory] = useState([]) // Stores the last 5 files
+  const [currentUser, setCurrentUser] = useState(null)
+  const [accessToken, setAccessToken] = useState(null)
+  const [authModalMode, setAuthModalMode] = useState(null)
+  const [userHistory, setUserHistory] = useState([])
 
-  const fetchUserHistory = async (username) => {
-    try {
-      const res = await fetch(`${API_URL.replace('/analyze', '')}/auth/history/${username}`)
-      if (res.ok) {
-        setUserHistory(await res.json())
-      }
-    } catch (err) {
-      console.error('Failed to fetch user history', err)
+  const authHeaders = useCallback((token) =>
+    token ? { Authorization: `Bearer ${token}` } : {}
+  , [])
+
+  useEffect(() => {
+    const tryRefresh = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST', credentials: 'include' })
+        if (!res.ok) return
+        const { access_token } = await res.json()
+        const meRes = await fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${access_token}` } })
+        if (meRes.ok) {
+          setCurrentUser(await meRes.json())
+          setAccessToken(access_token)
+        }
+      } catch { /* not authenticated */ }
     }
-  }
+    tryRefresh()
+  }, [])
 
-  const saveToHistory = async (filename, content) => {
-    if (!currentUser) return;
+  const fetchUserHistory = useCallback(async (token) => {
+    if (!token) return
     try {
-      await fetch(`${API_URL.replace('/analyze', '')}/auth/history`, {
+      const res = await fetch(`${API_BASE}/history?limit=10`, { headers: authHeaders(token) })
+      if (res.ok) setUserHistory(await res.json())
+    } catch (err) {
+      console.error('Failed to fetch history', err)
+    }
+  }, [authHeaders])
+
+  useEffect(() => {
+    if (accessToken) fetchUserHistory(accessToken)
+  }, [accessToken, fetchUserHistory])
+
+  const saveToHistory = useCallback(async (filename, content, rowCount, colCount) => {
+    if (!accessToken) return
+    const ext = filename.split('.').pop().toLowerCase()
+    try {
+      await fetch(`${API_BASE}/history`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: currentUser, filename, content })
+        headers: { 'Content-Type': 'application/json', ...authHeaders(accessToken) },
+        body: JSON.stringify({ filename, original_format: ext, row_count: rowCount, column_count: colCount, file_content: content }),
       })
-      fetchUserHistory(currentUser)
+      fetchUserHistory(accessToken)
     } catch (err) {
       console.error('Failed to save to history', err)
     }
-  }
+  }, [accessToken, authHeaders, fetchUserHistory])
 
-  useEffect(() => {
-    if (currentUser) {
-      fetchUserHistory(currentUser)
-    }
-  }, [currentUser])
-
-  const handleAuthSuccess = (username) => {
-    localStorage.setItem('currentUser', username)
-    setCurrentUser(username)
+  const handleAuthSuccess = (user, token) => {
+    setCurrentUser(user)
+    setAccessToken(token)
     setAuthModalMode(null)
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('currentUser')
+  const handleLogout = async () => {
+    try { await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }) }
+    catch { /* ignore */ }
     setCurrentUser(null)
+    setAccessToken(null)
     setUserHistory([])
+  }
+
+  const handleHistoryItemClick = async (item) => {
+    if (!accessToken) return
+    try {
+      const res = await fetch(`${API_BASE}/history/${item.id}`, { headers: authHeaders(accessToken) })
+      if (res.ok) {
+        const detail = await res.json()
+        if (detail.file_content) handleFileAccepted(detail.file_content, item.filename, true)
+      }
+    } catch (err) {
+      console.error('Failed to load history item', err)
+    }
   }
 
   const pushHistory = useCallback((rows, hist, idx) => {
@@ -159,27 +166,20 @@ function App() {
     return { newHist, newIdx: newHist.length - 1 }
   }, [])
 
-  const handleFileAccepted = async (fileOrContent, name) => {
+  const handleFileAccepted = async (fileOrContent, name, fromHistory = false) => {
     setIsLoading(true)
-    const BASE_URL = API_URL.replace('/analyze', '')
     try {
       const ext = name.split('.').pop().toLowerCase()
       const isCsv = ext === 'csv'
 
       if (typeof fileOrContent === 'string') {
-        // Loaded from history or text content — always treat as CSV
-        const textChunk = fileOrContent
-        const lines = parseCSV(textChunk)
-        if (lines.length === 0) {
-          alert('File is empty')
-          setIsLoading(false)
-          return
-        }
+        const lines = parseCSV(fileOrContent)
+        if (!lines.length) { alert('File is empty'); return }
         const headers = parseCSVLine(lines[0])
         const rows = lines.slice(1).map(line => {
-          const values = parseCSVLine(line)
+          const vals = parseCSVLine(line)
           const obj = {}
-          headers.forEach((h, i) => { obj[h] = values[i] || '' })
+          headers.forEach((h, i) => { obj[h] = vals[i] || '' })
           return obj
         })
         setCsvHeaders(headers)
@@ -189,39 +189,27 @@ function App() {
         setFileName(name)
         setPendingChanges([])
         setStep('preview')
-
-        saveToHistory(name, textChunk)
-
+        if (!fromHistory) saveToHistory(name, fileOrContent, rows.length, headers.length)
         try {
-          const blob = new Blob([textChunk], { type: 'text/csv' })
-          const fullFile = new File([blob], name, { type: 'text/csv' })
           const fd = new FormData()
-          fd.append('file', fullFile)
-          const res = await fetch(API_URL, { method: 'POST', body: fd })
+          fd.append('file', new File([new Blob([fileOrContent], { type: 'text/csv' })], name, { type: 'text/csv' }))
+          const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd })
           if (res.ok) setAnalysisData(await res.json())
-        } catch (e) {
-          console.log('Backend unavailable for initial analysis')
-        }
+        } catch { /* backend unavailable */ }
         return
       }
 
-      // fileOrContent is a File object
       const fullFile = fileOrContent
 
       if (isCsv) {
-        // Parse client-side
-        const textChunk = await fullFile.text()
-        const lines = parseCSV(textChunk)
-        if (lines.length === 0) {
-          alert('CSV file is empty')
-          setIsLoading(false)
-          return
-        }
+        const text = await fullFile.text()
+        const lines = parseCSV(text)
+        if (!lines.length) { alert('CSV file is empty'); return }
         const headers = parseCSVLine(lines[0])
         const rows = lines.slice(1).map(line => {
-          const values = parseCSVLine(line)
+          const vals = parseCSVLine(line)
           const obj = {}
-          headers.forEach((h, i) => { obj[h] = values[i] || '' })
+          headers.forEach((h, i) => { obj[h] = vals[i] || '' })
           return obj
         })
         setCsvHeaders(headers)
@@ -231,33 +219,20 @@ function App() {
         setFileName(name)
         setPendingChanges([])
         setStep('preview')
-
-        saveToHistory(name, textChunk)
-
+        if (!fromHistory) saveToHistory(name, text, rows.length, headers.length)
         try {
           const fd = new FormData()
           fd.append('file', fullFile)
-          const res = await fetch(API_URL, { method: 'POST', body: fd })
+          const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd })
           if (res.ok) setAnalysisData(await res.json())
-        } catch (e) {
-          console.log('Backend unavailable for initial analysis')
-        }
+        } catch { /* backend unavailable */ }
       } else {
-        // Non-CSV: use /parse endpoint to get headers + rows
         const fd = new FormData()
         fd.append('file', fullFile)
-        const parseRes = await fetch(`${BASE_URL}/parse`, { method: 'POST', body: fd })
-        if (!parseRes.ok) {
-          const errText = await parseRes.text()
-          throw new Error(`Parse error: ${errText}`)
-        }
+        const parseRes = await fetch(`${API_BASE}/parse`, { method: 'POST', body: fd })
+        if (!parseRes.ok) throw new Error(`Parse error: ${await parseRes.text()}`)
         const { headers, rows } = await parseRes.json()
-        if (!headers || headers.length === 0) {
-          alert('File is empty or could not be parsed')
-          setIsLoading(false)
-          return
-        }
-
+        if (!headers?.length) { alert('File is empty or could not be parsed'); return }
         setCsvHeaders(headers)
         setCsvRows(rows)
         setHistory([rows])
@@ -265,18 +240,12 @@ function App() {
         setFileName(name)
         setPendingChanges([])
         setStep('preview')
-
-        // Save the original file as base64 in history? For simplicity skip binary save.
-        // saveToHistory(name, ...) — skip for non-CSV
-
         try {
           const fd2 = new FormData()
           fd2.append('file', fullFile)
-          const res = await fetch(API_URL, { method: 'POST', body: fd2 })
+          const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd2 })
           if (res.ok) setAnalysisData(await res.json())
-        } catch (e) {
-          console.log('Backend unavailable for initial analysis')
-        }
+        } catch { /* backend unavailable */ }
       }
     } catch (err) {
       alert('Error: ' + err.message)
@@ -328,14 +297,18 @@ function App() {
     }
   }
 
+  const buildCSVFile = () => {
+    const csv = [encodeCSVLine(csvHeaders), ...csvRows.map(r => encodeCSVLine(csvHeaders.map(h => r[h] || '')))].join('\n')
+    return { csv, file: new File([new Blob([csv], { type: 'text/csv' })], fileName, { type: 'text/csv' }) }
+  }
+
   const handleReAnalyze = async () => {
     setIsLoading(true)
     try {
-      const csvLines = [encodeCSVLine(csvHeaders), ...csvRows.map(r => encodeCSVLine(csvHeaders.map(h => r[h] || '')))]
-      const csv = csvLines.join('\n')
+      const { file } = buildCSVFile()
       const fd = new FormData()
-      fd.append('file', new File([new Blob([csv], { type: 'text/csv' })], fileName, { type: 'text/csv' }))
-      const res = await fetch(API_URL, { method: 'POST', body: fd })
+      fd.append('file', file)
+      const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd })
       if (res.ok) {
         setAnalysisData(await res.json())
         setHasUnsavedEdits(false)
@@ -356,25 +329,15 @@ function App() {
     setIsAnimatingScore(true)
     const preFixScore = analysisData?.overall_quality_score ?? null
     try {
-      const csvLines = [encodeCSVLine(csvHeaders), ...csvRows.map(r => encodeCSVLine(csvHeaders.map(h => r[h] || '')))]
-      const csv = csvLines.join('\n')
+      const { file } = buildCSVFile()
       const fd = new FormData()
-      fd.append('file', new File([new Blob([csv], { type: 'text/csv' })], fileName, { type: 'text/csv' }))
-      const autofixUrl = API_URL.replace('/analyze', '/autofix')
-      const res = await fetch(autofixUrl, { method: 'POST', body: fd })
+      fd.append('file', file)
+      const res = await fetch(`${API_BASE}/autofix`, { method: 'POST', body: fd })
+      if (!res.ok) throw new Error(`Backend error: ${res.status} - ${await res.text()}`)
 
-      if (!res.ok) {
-        const errorText = await res.text()
-        throw new Error(`Backend error: ${res.status} - ${errorText}`)
-      }
-
-      const result = await res.json()
-      const { cleaned_csv, changes } = result
-
+      const { cleaned_csv, changes } = await res.json()
       const lines = parseCSV(cleaned_csv)
-      if (lines.length === 0) {
-        throw new Error('Empty response from server')
-      }
+      if (!lines.length) throw new Error('Empty response from server')
 
       const newHeaders = parseCSVLine(lines[0])
       const newRows = lines.slice(1).map(line => {
@@ -394,20 +357,13 @@ function App() {
       try {
         const cfd = new FormData()
         cfd.append('file', new File([new Blob([cleaned_csv], { type: 'text/csv' })], fileName, { type: 'text/csv' }))
-        const ar = await fetch(API_URL, { method: 'POST', body: cfd })
+        const ar = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: cfd })
         if (ar.ok) {
-          const newAnalysis = await ar.json()
-          setAnalysisData(newAnalysis)
+          setAnalysisData(await ar.json())
           setOriginalScore(preFixScore)
-
-          setTimeout(() => {
-            setIsAnimatingScore(false)
-          }, 1500)
+          setTimeout(() => setIsAnimatingScore(false), 1500)
         }
-      } catch (e) {
-        console.error('Auto-reanalyze failed:', e)
-        setIsAnimatingScore(false)
-      }
+      } catch { setIsAnimatingScore(false) }
     } catch (err) {
       alert('Auto-Fix Error: ' + err.message)
       setIsAnimatingScore(false)
@@ -450,9 +406,7 @@ function App() {
     let updated = [...csvRows]
     for (const change of pendingChanges) {
       if (change.kind === 'critical' || change.new_value === '') continue
-      if (updated[change.row]) {
-        updated[change.row] = { ...updated[change.row], [change.column]: change.new_value }
-      }
+      if (updated[change.row]) updated[change.row] = { ...updated[change.row], [change.column]: change.new_value }
     }
     setCsvRows(updated)
     setHasUnsavedEdits(true)
@@ -465,9 +419,7 @@ function App() {
   const handleDenyAllChanges = useCallback(() => {
     let updated = [...csvRows]
     for (const change of pendingChanges) {
-      if (updated[change.row]) {
-        updated[change.row] = { ...updated[change.row], [change.column]: change.old_value }
-      }
+      if (updated[change.row]) updated[change.row] = { ...updated[change.row], [change.column]: change.old_value }
     }
     setCsvRows(updated)
     setHasUnsavedEdits(true)
@@ -478,16 +430,14 @@ function App() {
   }, [csvRows, history, historyIndex, pushHistory, pendingChanges])
 
   const handleSaveCurrentToHistory = async () => {
-    if (!currentUser) return
-    const csvLines = [encodeCSVLine(csvHeaders), ...csvRows.map(r => encodeCSVLine(csvHeaders.map(h => r[h] || '')))]
-    const csv = csvLines.join('\n')
-    await saveToHistory(fileName, csv)
+    if (!accessToken) return
+    const { csv } = buildCSVFile()
+    await saveToHistory(fileName, csv, csvRows.length, csvHeaders.length)
     setHasUnsavedEdits(false)
   }
 
   const handleExport = () => {
-    const csvLines = [encodeCSVLine(csvHeaders), ...csvRows.map(r => encodeCSVLine(csvHeaders.map(h => r[h] || '')))]
-    const csv = csvLines.join('\n')
+    const { csv } = buildCSVFile()
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
     const a = document.createElement('a')
     a.href = url
@@ -503,19 +453,10 @@ function App() {
         <div className="app-header">
           {currentUser ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>Welcome, <strong>{currentUser}</strong>!</span>
+              <span>Welcome, <strong>{currentUser.username}</strong>!</span>
               <button
                 onClick={handleLogout}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid #475569',
-                  color: '#94a3b8',
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  marginLeft: '12px'
-                }}
+                style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s', marginLeft: '12px' }}
                 onMouseEnter={e => { e.target.style.color = '#f8fafc'; e.target.style.borderColor = '#94a3b8' }}
                 onMouseLeave={e => { e.target.style.color = '#94a3b8'; e.target.style.borderColor = '#475569' }}
               >
@@ -523,15 +464,11 @@ function App() {
               </button>
             </div>
           ) : (
-            <LoginButtons
-              onLogin={() => setAuthModalMode('login')}
-              onSignup={() => setAuthModalMode('signup')}
-            />
+            <LoginButtons onLogin={() => setAuthModalMode('login')} onSignup={() => setAuthModalMode('signup')} />
           )}
         </div>
 
         <div style={{ display: 'flex', width: '100%', maxWidth: '1000px', gap: '32px', alignItems: 'flex-start', marginTop: '40px' }}>
-          {/* History Sidebar */}
           {currentUser && (
             <div style={{ flex: '0 0 300px', background: '#1e293b', padding: '24px', borderRadius: '12px', border: '1px solid #334155' }}>
               <h3 style={{ marginTop: 0, marginBottom: '16px', color: '#f8fafc', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -544,11 +481,8 @@ function App() {
                   {userHistory.map(item => (
                     <div
                       key={item.id}
-                      onClick={() => handleFileAccepted(item.content, item.filename)}
-                      style={{
-                        background: '#0f172a', padding: '12px', borderRadius: '8px', cursor: 'pointer',
-                        border: '1px solid transparent', transition: 'all 0.2s'
-                      }}
+                      onClick={() => handleHistoryItemClick(item)}
+                      style={{ background: '#0f172a', padding: '12px', borderRadius: '8px', cursor: 'pointer', border: '1px solid transparent', transition: 'all 0.2s' }}
                       onMouseEnter={e => e.currentTarget.style.borderColor = '#8b5cf6'}
                       onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
                     >
@@ -556,7 +490,7 @@ function App() {
                         {item.filename}
                       </div>
                       <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
-                        {new Date(item.updated_at).toLocaleString()}
+                        {new Date(item.created_at).toLocaleString()}
                       </div>
                     </div>
                   ))}
@@ -565,7 +499,6 @@ function App() {
             </div>
           )}
 
-          {/* Upload Area */}
           <div style={{ flex: 1 }}>
             <DragAndDrop onFileAccepted={handleFileAccepted} />
             {isLoading && <div className="loading-indicator">Processing file…</div>}
@@ -588,7 +521,6 @@ function App() {
       <div className="preview-topbar">
         <button className="back-btn" onClick={handleBack}><ArrowLeft size={18} /> Back</button>
         <h1 className="preview-title">Clarifi.ai</h1>
-        {/* ── Search bar centred in topbar ── */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '0 16px' }}>
           <SearchBar onSearch={setSearchQuery} />
         </div>
@@ -615,7 +547,7 @@ function App() {
           </button>
           {currentUser && (
             <button onClick={handleSaveCurrentToHistory} disabled={isLoading || isFixing}
-              title="Save current state to your history so you can reload it later"
+              title="Save current state to your history"
               style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '8px', border: '1px solid #f59e0b', cursor: (isLoading || isFixing) ? 'not-allowed' : 'pointer', fontWeight: 'bold', backgroundColor: hasUnsavedEdits ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', color: hasUnsavedEdits ? '#fbbf24' : '#94a3b8', transition: 'all 0.2s' }}>
               <Save size={16} />
               {hasUnsavedEdits ? 'Save *' : 'Saved'}
@@ -629,18 +561,9 @@ function App() {
       </div>
       <div className="preview-body">
         <div className="preview-table-area">
-          {/* ── Info strip: columns + rows only ── */}
-          <div style={{
-            textAlign: 'center',
-            fontSize: '12px',
-            color: '#475569',
-            fontWeight: 600,
-            marginBottom: '8px',
-            letterSpacing: '0.3px',
-          }}>
+          <div style={{ textAlign: 'center', fontSize: '12px', color: '#475569', fontWeight: 600, marginBottom: '8px', letterSpacing: '0.3px' }}>
             {csvHeaders.length} columns&nbsp;&nbsp;•&nbsp;&nbsp;{csvRows.length} rows
           </div>
-          {/* ── Table ── */}
           <CsvTable
             csvRows={csvRows}
             headers={csvHeaders}

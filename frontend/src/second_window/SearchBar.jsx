@@ -2,136 +2,119 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Search, X, Clock } from 'lucide-react'
 import './SearchBar.css'
 
-const API_BASE = import.meta.env.VITE_API_URL
-    ? import.meta.env.VITE_API_URL.replace('/analyze', '')
-    : 'http://127.0.0.1:8000'
-
-// Delay before closing dropdown on blur, to allow click-on-item to register first
+const STORAGE_KEY = 'clarifi_search_history'
+const MAX_HISTORY = 10
 const BLUR_DELAY_MS = 150
 
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') }
+  catch { return [] }
+}
+
+function persistHistory(items) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
+}
+
 export default function SearchBar({ onSearch }) {
-    const [query, setQuery] = useState('')
-    const [history, setHistory] = useState([])
-    const [showDrop, setShowDrop] = useState(false)
-    const inputRef = useRef(null)
-    const wrapRef = useRef(null)
-    const timerRef = useRef(null)
+  const [query, setQuery] = useState('')
+  const [history, setHistory] = useState(loadHistory)
+  const [showDrop, setShowDrop] = useState(false)
+  const inputRef = useRef(null)
+  const wrapRef = useRef(null)
+  const timerRef = useRef(null)
 
-    // ── fetch history ───────────────────────────────────────────────
-    const fetchHistory = useCallback(async () => {
-        try {
-            const res = await fetch(`${API_BASE}/search-history`)
-            if (res.ok) setHistory(await res.json())
-        } catch { /* backend may be offline */ }
-    }, [])
-
-    useEffect(() => { fetchHistory() }, [fetchHistory])
-
-    // ── close dropdown on outside click ────────────────────────────
-    useEffect(() => {
-        const handler = (e) => {
-            if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-                setShowDrop(false)
-            }
-        }
-        document.addEventListener('mousedown', handler)
-        return () => document.removeEventListener('mousedown', handler)
-    }, [])
-
-    // ── debounced search ────────────────────────────────────────────
-    const handleChange = (e) => {
-        const val = e.target.value
-        setQuery(val)
-        setShowDrop(true)
-        clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(() => onSearch(val), 200)
+  useEffect(() => {
+    const handler = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setShowDrop(false)
     }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
-    // ── persist on Enter or blur ────────────────────────────────────
-    const persist = useCallback(async (q) => {
-        if (!q.trim()) return
-        try {
-            await fetch(`${API_BASE}/search-history`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: q.trim() }),
-            })
-            fetchHistory()
-        } catch { /* offline */ }
-    }, [fetchHistory])
+  const handleChange = (e) => {
+    const val = e.target.value
+    setQuery(val)
+    setShowDrop(true)
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => onSearch(val), 200)
+  }
 
-    const handleKeyDown = (e) => {
-        if (e.key === 'Enter') { persist(query); setShowDrop(false) }
-        if (e.key === 'Escape') { clearSearch() }
-    }
+  const addToHistory = useCallback((q) => {
+    if (!q.trim()) return
+    const trimmed = q.trim()
+    setHistory((prev) => {
+      const updated = [{ id: Date.now(), query: trimmed }, ...prev.filter((h) => h.query !== trimmed)].slice(0, MAX_HISTORY)
+      persistHistory(updated)
+      return updated
+    })
+  }, [])
 
-    const handleBlur = () => {
-        persist(query)
-        setTimeout(() => setShowDrop(false), BLUR_DELAY_MS) // delay so click on item registers
-    }
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') { addToHistory(query); setShowDrop(false) }
+    if (e.key === 'Escape') clearSearch()
+  }
 
-    // ── clear ───────────────────────────────────────────────────────
-    const clearSearch = () => {
-        setQuery('')
-        onSearch('')
-        inputRef.current?.focus()
-    }
+  const handleBlur = () => {
+    addToHistory(query)
+    setTimeout(() => setShowDrop(false), BLUR_DELAY_MS)
+  }
 
-    // ── pick a history item ─────────────────────────────────────────
-    const pickHistory = (item) => {
-        setQuery(item.query)
-        onSearch(item.query)
-        setShowDrop(false)
-    }
+  const clearSearch = () => {
+    setQuery('')
+    onSearch('')
+    inputRef.current?.focus()
+  }
 
-    // ── delete a history item ───────────────────────────────────────
-    const deleteHistory = async (e, item) => {
-        e.stopPropagation()
-        try {
-            await fetch(`${API_BASE}/search-history/${item.id}`, { method: 'DELETE' })
-            setHistory(prev => prev.filter(h => h.id !== item.id))
-        } catch { /* offline */ }
-    }
+  const pickHistory = (item) => {
+    setQuery(item.query)
+    onSearch(item.query)
+    setShowDrop(false)
+  }
 
-    return (
-        <div className="searchbar-wrap" ref={wrapRef}>
-            <div className="searchbar-input-row">
-                <Search size={15} className="searchbar-icon" />
-                <input
-                    ref={inputRef}
-                    className="searchbar-input"
-                    type="text"
-                    placeholder="Search in table…"
-                    value={query}
-                    onChange={handleChange}
-                    onFocus={() => setShowDrop(true)}
-                    onKeyDown={handleKeyDown}
-                    onBlur={handleBlur}
-                />
-                {query && (
-                    <button className="searchbar-clear" onClick={clearSearch} tabIndex={-1}>
-                        <X size={13} />
-                    </button>
-                )}
-            </div>
+  const deleteHistoryItem = (e, item) => {
+    e.stopPropagation()
+    setHistory((prev) => {
+      const updated = prev.filter((h) => h.id !== item.id)
+      persistHistory(updated)
+      return updated
+    })
+  }
 
-            {showDrop && history.length > 0 && (
-                <ul className="searchbar-dropdown">
-                    {history.map(item => (
-                        <li key={item.id} className="searchbar-history-item" onMouseDown={() => pickHistory(item)}>
-                            <Clock size={12} className="searchbar-hist-icon" />
-                            <span className="searchbar-hist-text">{item.query}</span>
-                            <button
-                                className="searchbar-hist-del"
-                                onMouseDown={(e) => deleteHistory(e, item)}
-                                title="Remove"
-                            >
-                                <X size={11} />
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </div>
-    )
+  return (
+    <div className="searchbar-wrap" ref={wrapRef}>
+      <div className="searchbar-input-row">
+        <Search size={15} className="searchbar-icon" />
+        <input
+          ref={inputRef}
+          className="searchbar-input"
+          type="text"
+          placeholder="Search in table…"
+          value={query}
+          onChange={handleChange}
+          onFocus={() => setShowDrop(true)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+        />
+        {query && (
+          <button className="searchbar-clear" onClick={clearSearch} tabIndex={-1}>
+            <X size={13} />
+          </button>
+        )}
+      </div>
+
+      {showDrop && history.length > 0 && (
+        <ul className="searchbar-dropdown">
+          {history.map((item) => (
+            <li key={item.id} className="searchbar-history-item" onMouseDown={() => pickHistory(item)}>
+              <Clock size={12} className="searchbar-hist-icon" />
+              <span className="searchbar-hist-text">{item.query}</span>
+              <button className="searchbar-hist-del" onMouseDown={(e) => deleteHistoryItem(e, item)} title="Remove">
+                <X size={11} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }

@@ -1,95 +1,109 @@
-import React, { useState } from 'react';
-import './AuthModal.css';
+import React, { useState } from 'react'
+import './AuthModal.css'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const API_BASE = '/api/v1'
 
 function AuthModal({ onClose, onSuccess, initialMode = 'login' }) {
-    const [mode, setMode] = useState(initialMode); // 'login' or 'signup'
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState(initialMode)
+  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
 
-        if (!username.trim() || !password.trim()) {
-            setError('Please fill in all fields');
-            return;
-        }
+    if (mode === 'login' && (!email.trim() || !password.trim())) {
+      setError('Please fill in all fields')
+      return
+    }
+    if (mode === 'signup') {
+      if (!email.trim() || !username.trim() || !password.trim() || !confirmPassword.trim()) {
+        setError('Please fill in all fields')
+        return
+      }
+      if (password !== confirmPassword) {
+        setError('Passwords do not match')
+        return
+      }
+    }
 
-        setLoading(true);
-        const endpoint = mode === 'login' ? '/auth/login' : '/auth/signup';
+    setLoading(true)
 
-        try {
-            const res = await fetch(`${API_URL}${endpoint}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ username, password }),
-            });
+    const endpoint = mode === 'login' ? '/auth/login' : '/auth/register'
+    const body = mode === 'login'
+      ? { email, password }
+      : { email, username, password, confirm_password: confirmPassword }
 
-            const data = await res.json();
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Authentication failed')
+      onSuccess(data.user, data.access_token)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
-            if (!res.ok) {
-                throw new Error(data.detail || 'Authentication failed');
-            }
+  const switchMode = (m) => { setMode(m); setError('') }
 
-            // Success
-            onSuccess(data.username);
-        } catch (err) {
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
+  return (
+    <div className="auth-overlay" onClick={onClose}>
+      <div className="auth-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="auth-close" onClick={onClose}>&times;</button>
+        <h2>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
 
-    return (
-        <div className="auth-overlay" onClick={onClose}>
-            <div className="auth-modal" onClick={e => e.stopPropagation()}>
-                <button className="auth-close" onClick={onClose}>&times;</button>
-                <h2>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
+        {error && <div className="auth-error">{error}</div>}
 
-                {error && <div className="auth-error">{error}</div>}
+        <form onSubmit={handleSubmit}>
+          <div className="auth-field">
+            <label>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={loading} autoFocus />
+          </div>
 
-                <form onSubmit={handleSubmit}>
-                    <div className="auth-field">
-                        <label>Username</label>
-                        <input
-                            type="text"
-                            value={username}
-                            onChange={e => setUsername(e.target.value)}
-                            disabled={loading}
-                            autoFocus
-                        />
-                    </div>
-                    <div className="auth-field">
-                        <label>Password</label>
-                        <input
-                            type="password"
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            disabled={loading}
-                        />
-                    </div>
-
-                    <button type="submit" className="auth-submit" disabled={loading}>
-                        {loading ? 'Please wait...' : (mode === 'login' ? 'Log In' : 'Sign Up')}
-                    </button>
-                </form>
-
-                <div className="auth-switch">
-                    {mode === 'login' ? (
-                        <>Don't have an account? <span onClick={() => { setMode('signup'); setError(''); }}>Sign up</span></>
-                    ) : (
-                        <>Already have an account? <span onClick={() => { setMode('login'); setError(''); }}>Log in</span></>
-                    )}
-                </div>
+          {mode === 'signup' && (
+            <div className="auth-field">
+              <label>Username</label>
+              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} disabled={loading} />
             </div>
+          )}
+
+          <div className="auth-field">
+            <label>Password</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading} />
+          </div>
+
+          {mode === 'signup' && (
+            <div className="auth-field">
+              <label>Confirm Password</label>
+              <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={loading} />
+            </div>
+          )}
+
+          <button type="submit" className="auth-submit" disabled={loading}>
+            {loading ? 'Please wait…' : mode === 'login' ? 'Log In' : 'Sign Up'}
+          </button>
+        </form>
+
+        <div className="auth-switch">
+          {mode === 'login'
+            ? (<>Don't have an account?<span onClick={() => switchMode('signup')}> Sign up</span></>)
+            : (<>Already have an account?<span onClick={() => switchMode('login')}> Log in</span></>)
+          }
         </div>
-    );
+      </div>
+    </div>
+  )
 }
 
-export default AuthModal;
+export default AuthModal
