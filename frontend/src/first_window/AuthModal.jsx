@@ -33,27 +33,34 @@ function AuthModal({ onClose, onSuccess, initialMode = 'login' }) {
 
     setLoading(true)
 
-    const endpoint = mode === 'login' ? '/auth/login' : '/auth/register'
-    const body = mode === 'login'
-      ? { email, password }
-      : { email, username, password, confirm_password: confirmPassword }
+  const endpoint = mode === 'login' ? '/auth/login' : '/auth/register'
+  const body = mode === 'login'
+    ? { email, password }
+    : { email, username, password, confirm_password: confirmPassword }
 
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body),
+    })
+
+    let data
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || 'Authentication failed')
-      onSuccess(data.user, data.access_token)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+      data = await res.json()
+    } catch {
+      throw new Error(`Server error (${res.status}) — check backend logs`)
     }
+
+    if (!res.ok) throw new Error(data.detail || 'Authentication failed')
+    onSuccess(data.user, data.access_token)
+  } catch (err) {
+    setError(err.message)
+  } finally {
+    setLoading(false)
   }
+}
 
   const switchMode = (m) => { setMode(m); setError('') }
 
