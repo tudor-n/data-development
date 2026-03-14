@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import './AuthModal.css'
 
 const API_BASE = '/api/v1'
@@ -11,6 +12,17 @@ function AuthModal({ onClose, onSuccess, initialMode = 'login' }) {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  
+  const [showPassword, setShowPassword] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
+
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('rememberedEmail')
+    if (savedEmail) {
+      setEmail(savedEmail)
+      setRememberMe(true)
+    }
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -33,34 +45,47 @@ function AuthModal({ onClose, onSuccess, initialMode = 'login' }) {
 
     setLoading(true)
 
-  const endpoint = mode === 'login' ? '/auth/login' : '/auth/register'
-  const body = mode === 'login'
-    ? { email, password }
-    : { email, username, password, confirm_password: confirmPassword }
+    const endpoint = mode === 'login' ? '/auth/login' : '/auth/register'
+    const body = mode === 'login'
+      ? { email, password }
+      : { email, username, password, confirm_password: confirmPassword }
 
-  try {
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(body),
-    })
-
-    let data
     try {
-      data = await res.json()
-    } catch {
-      throw new Error(`Server error (${res.status}) — check backend logs`)
-    }
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      })
 
-    if (!res.ok) throw new Error(data.detail || 'Authentication failed')
-    onSuccess(data.user, data.access_token)
-  } catch (err) {
-    setError(err.message)
-  } finally {
-    setLoading(false)
+      let data
+      try { data = await res.json() } catch { throw new Error(`Server error (${res.status})`) }
+
+      if (!res.ok) throw new Error(data.detail || 'Authentication failed')
+      
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', email)
+      } else {
+        localStorage.removeItem('rememberedEmail')
+      }
+
+      if (mode === 'login') {
+        if (rememberMe) {
+          localStorage.setItem('accessToken', data.access_token)
+        } else {
+          sessionStorage.setItem('accessToken', data.access_token)
+        }
+      } else {
+        sessionStorage.setItem('accessToken', data.access_token)
+      }
+
+      onSuccess(data.user, data.access_token)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }
-}
 
   const switchMode = (m) => { setMode(m); setError('') }
 
@@ -85,17 +110,41 @@ function AuthModal({ onClose, onSuccess, initialMode = 'login' }) {
             </div>
           )}
 
-          <div className="auth-field">
+          <div className="auth-field" style={{ position: 'relative' }}>
             <label>Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading} />
+            <input 
+              type={showPassword ? "text" : "password"} 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+              disabled={loading} 
+              style={{ paddingRight: '40px' }}
+            />
+            <button 
+              type="button" 
+              onClick={() => setShowPassword(!showPassword)}
+              style={{ position: 'absolute', right: '10px', top: '32px', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
           </div>
 
           {mode === 'signup' && (
             <div className="auth-field">
               <label>Confirm Password</label>
-              <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={loading} />
+              <input type={showPassword ? "text" : "password"}  value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={loading} />
             </div>
           )}
+
+          <div className="auth-field" style={{ flexDirection: 'row', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input 
+              type="checkbox" 
+              id="rememberMe" 
+              checked={rememberMe} 
+              onChange={(e) => setRememberMe(e.target.checked)} 
+              style={{ width: 'auto', margin: 0 }}
+            />
+            <label htmlFor="rememberMe" style={{ margin: 0, fontSize: '0.9rem', cursor: 'pointer' }}>Remember Me</label>
+          </div>
 
           <button type="submit" className="auth-submit" disabled={loading}>
             {loading ? 'Please wait…' : mode === 'login' ? 'Log In' : 'Sign Up'}
@@ -112,5 +161,4 @@ function AuthModal({ onClose, onSuccess, initialMode = 'login' }) {
     </div>
   )
 }
-
 export default AuthModal

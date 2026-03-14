@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react'
 import {
   ArrowLeft, Download, Undo, Redo, Wand2, Save,
-  AlertTriangle, CheckCircle, FileDown, Layers,
+  AlertTriangle, CheckCircle, FileDown, Layers, Trash2 
 } from 'lucide-react'
 
 import DragAndDrop    from './first_window/dragAndDrop'
@@ -102,22 +102,81 @@ export default function App() {
   useEffect(() => {
     const tryRefresh = async () => {
       try {
+        const savedToken = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken')
+        
+        if (savedToken) {
+          const meRes = await fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${savedToken}` } })
+          if (meRes.ok) { 
+            setCurrentUser(await meRes.json())
+            setAccessToken(savedToken)
+            return
+          } else {
+            localStorage.removeItem('accessToken')
+            sessionStorage.removeItem('accessToken')
+          }
+        }
+
         const res = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST', credentials: 'include' })
         if (!res.ok) return
         const { access_token } = await res.json()
         const meRes = await fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${access_token}` } })
         if (meRes.ok) { setCurrentUser(await meRes.json()); setAccessToken(access_token) }
-      } catch { /**/ }
+      } catch { }
     }
     tryRefresh()
   }, [])
+
+  useEffect(() => {
+    const savedWs = sessionStorage.getItem('clarifi_workspace')
+    if (savedWs) {
+      try {
+        const ws = JSON.parse(savedWs)
+        setCsvRows(ws.csvRows || [])
+        setCsvHeaders(ws.csvHeaders || [])
+        setFileName(ws.fileName || '')
+        setAnalysisData(ws.analysisData || null)
+        setOriginalScore(ws.originalScore || null)
+        setHistory(ws.history || [])
+        setHistoryIndex(ws.historyIndex ?? -1)
+        setHasUnsavedEdits(ws.hasUnsavedEdits || false)
+        setPendingChanges(ws.pendingChanges || [])
+        setActiveTab(ws.activeTab || 'clean')
+        setQuarantineRows(ws.quarantineRows || [])
+        setQuarantineHeaders(ws.quarantineHeaders || [])
+        setQuarantineCSV(ws.quarantineCSV || '')
+        setStep(ws.step || 'upload')
+      } catch (e) {
+        sessionStorage.removeItem('clarifi_workspace')
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (step === 'preview') {
+      try {
+        sessionStorage.setItem('clarifi_workspace', JSON.stringify({
+          step, csvRows, csvHeaders, fileName, analysisData, originalScore,
+          history, historyIndex, hasUnsavedEdits, pendingChanges,
+          activeTab, quarantineRows, quarantineHeaders, quarantineCSV
+        }))
+      } catch (e) {
+        sessionStorage.removeItem('clarifi_workspace')
+      }
+    } else {
+      sessionStorage.removeItem('clarifi_workspace')
+    }
+  }, [
+    step, csvRows, csvHeaders, fileName, analysisData, originalScore,
+    history, historyIndex, hasUnsavedEdits, pendingChanges,
+    activeTab, quarantineRows, quarantineHeaders, quarantineCSV
+  ])
 
   const fetchUserHistory = useCallback(async (token) => {
     if (!token) return
     try {
       const res = await fetch(`${API_BASE}/history?limit=10`, { headers: authHeaders(token) })
       if (res.ok) setUserHistory(await res.json())
-    } catch { /**/ }
+    } catch { }
   }, [authHeaders])
 
   useEffect(() => { if (accessToken) fetchUserHistory(accessToken) }, [accessToken, fetchUserHistory])
@@ -134,7 +193,7 @@ export default function App() {
         }),
       })
       fetchUserHistory(accessToken)
-    } catch { /**/ }
+    } catch { }
   }, [accessToken, authHeaders, fetchUserHistory])
 
   const pushHistory = useCallback((rows, hist, idx) => {
@@ -165,11 +224,8 @@ export default function App() {
 
   const buildCSVFile = () => {
     const csv = [encodeCSVLine(csvHeaders), ...csvRows.map(r => encodeCSVLine(csvHeaders.map(h => r[h] || '')))].join('\n')
-    return { csv, file: new File([new Blob([csv], { type: 'text/csv' })], fileName, { type: 'text/csv' }) }
-  }
-
-  const resetQuarantine = () => {
-    setQuarantineRows([]); setQuarantineHeaders([]); setQuarantineCSV(''); setActiveTab('clean')
+    const safeFileName = fileName.replace(/\.[^/.]+$/, "") + ".csv"
+    return { csv, file: new File([new Blob([csv], { type: 'text/csv' })], safeFileName, { type: 'text/csv' }) }
   }
 
   const handleFileAccepted = async (fileOrContent, name, fromHistory = false) => {
@@ -177,7 +233,8 @@ export default function App() {
     try {
       let fileToUpload
       if (typeof fileOrContent === 'string') {
-        fileToUpload = new File([fileOrContent], name, { type: 'text/csv' })
+        const safeName = name.replace(/\.[^/.]+$/, "") + ".csv"
+        fileToUpload = new File([fileOrContent], safeName, { type: 'text/csv' })
       } else {
         fileToUpload = fileOrContent
       }
@@ -194,13 +251,15 @@ export default function App() {
       setCsvRows(rows)
       setHistory([rows])
       setHistoryIndex(0)
-      setFileName(name)
+      setFileName(name) 
       setPendingChanges([])
       resetQuarantine()
       setStep('preview')
 
       if (!fromHistory) {
-        const rawContent = typeof fileOrContent === 'string' ? fileOrContent : ''
+        const rawContent = typeof fileOrContent === 'string' 
+          ? fileOrContent 
+          : [encodeCSVLine(headers), ...rows.map(r => encodeCSVLine(headers.map(h => r[h] || '')))].join('\n')
         saveToHistory(name, rawContent, rows.length, headers.length)
       }
 
@@ -209,10 +268,14 @@ export default function App() {
         fd2.append('file', fileToUpload)
         const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd2 })
         if (res.ok) setAnalysisData(await res.json())
-      } catch { /**/ }
+      } catch { }
     } catch (err) {
       alert('Error: ' + err.message)
     } finally { setIsLoading(false) }
+  }
+
+  const resetQuarantine = () => {
+    setQuarantineRows([]); setQuarantineHeaders([]); setQuarantineCSV(''); setActiveTab('clean')
   }
 
   const handleHistoryItemClick = async (item) => {
@@ -223,7 +286,25 @@ export default function App() {
         const detail = await res.json()
         if (detail.file_content) handleFileAccepted(detail.file_content, item.filename, true)
       }
-    } catch { /**/ }
+    } catch { }
+  }
+
+  const deleteHistoryItem = async (e, entryId) => {
+    e.stopPropagation() 
+    if (!accessToken) return
+
+    try {
+      const res = await fetch(`${API_BASE}/history/${entryId}`, {
+        method: 'DELETE',
+        headers: authHeaders(accessToken)
+      })
+      if (!res.ok) throw new Error('Failed to delete project')
+      
+      setUserHistory(prev => prev.filter(item => item.id !== entryId))
+    } catch (err) {
+      console.error(err)
+      alert(err.message)
+    }
   }
 
   const handleBack = () => {
@@ -296,7 +377,10 @@ export default function App() {
       try {
         const cleanedCsv = [encodeCSVLine(newHeaders), ...newRows.map(r => encodeCSVLine(newHeaders.map(h => r[h] || '')))].join('\n')
         const cfd = new FormData()
-        cfd.append('file', new File([new Blob([cleanedCsv], { type: 'text/csv' })], fileName, { type: 'text/csv' }))
+        
+        const safeFileName = fileName.replace(/\.[^/.]+$/, "") + ".csv"
+        cfd.append('file', new File([new Blob([cleanedCsv], { type: 'text/csv' })], safeFileName, { type: 'text/csv' }))
+        
         const ar = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: cfd })
         if (ar.ok) {
           setAnalysisData(await ar.json()); setOriginalScore(preFixScore)
@@ -396,25 +480,44 @@ export default function App() {
     setHistory(newHist); setHistoryIndex(newIdx); setPendingChanges([])
   }, [csvRows, history, historyIndex, pushHistory, pendingChanges])
 
-  const handleExportClean = () => {
-    const { csv } = buildCSVFile()
-    triggerDownload('\ufeff' + csv, `Clean_${fileName}`)
+const handleExport = async (dataRows, prefix) => {
+    try {
+      const res = await fetch(`${API_BASE}/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: `${prefix}_${fileName}`,
+          headers: csvHeaders,
+          rows: dataRows
+        })
+      })
+      if (!res.ok) throw new Error('Export failed')
+      
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${prefix}_${fileName}`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      alert('Export error: ' + err.message)
+    }
   }
 
+  const handleExportClean = () => handleExport(csvRows, 'Clean')
+  
   const handleExportQuarantine = () => {
-    if (!quarantineCSV) return
-    triggerDownload('\ufeff' + quarantineCSV, `Quarantine_${fileName}`)
+    if (quarantineRows.length === 0) return
+    const qRows = quarantineRows.map(_stripInternalCols)
+    handleExport(qRows, 'Quarantine')
   }
 
   const handleExportFull = () => {
-    const allHeaders = csvHeaders
-    const cleanLines = csvRows.map(r => encodeCSVLine(allHeaders.map(h => r[h] || '')))
-    const qLines = quarantineRows.map(r => {
-      const clean = _stripInternalCols(r)
-      return encodeCSVLine(allHeaders.map(h => clean[h] || ''))
-    })
-    const full = [encodeCSVLine(allHeaders), ...cleanLines, ...qLines].join('\n')
-    triggerDownload('\ufeff' + full, `Full_${fileName}`)
+    const qRows = quarantineRows.map(_stripInternalCols)
+    handleExport([...csvRows, ...qRows], 'Full')
   }
 
   const handleSaveCurrentToHistory = async () => {
@@ -426,51 +529,115 @@ export default function App() {
 
   if (step === 'upload') {
     return (
-      <div className="app-page">
-        <div className="app-header">
-          {currentUser ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>Welcome, <strong>{currentUser.username}</strong>!</span>
-              <button onClick={async () => {
-                try { await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }) } catch { /**/ }
-                setCurrentUser(null); setAccessToken(null); setUserHistory([])
-              }} style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', marginLeft: 12 }}>
-                Logout
-              </button>
-            </div>
-          ) : (
-            <LoginButtons onLogin={() => setAuthModalMode('login')} onSignup={() => setAuthModalMode('signup')} />
-          )}
-        </div>
-
-        <div style={{ display: 'flex', width: '100%', maxWidth: 1000, gap: 32, alignItems: 'flex-start', marginTop: 40 }}>
-          {currentUser && (
-            <div style={{ flex: '0 0 300px', background: '#1e293b', padding: 24, borderRadius: 12, border: '1px solid #334155' }}>
-              <h3 style={{ marginTop: 0, marginBottom: 16, color: '#f8fafc', fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Undo size={18} /> Recent Files
-              </h3>
-              {userHistory.length === 0
-                ? <div style={{ color: '#64748b', fontSize: 14, fontStyle: 'italic' }}>No history yet.</div>
-                : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {userHistory.map(item => (
-                    <div key={item.id} onClick={() => handleHistoryItemClick(item)}
-                      style={{ background: '#0f172a', padding: 12, borderRadius: 8, cursor: 'pointer', border: '1px solid transparent', transition: 'all 0.2s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = '#8b5cf6'}
-                      onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}>
+      <div className="app-page" style={{ 
+        display: 'flex', 
+        flexDirection: 'row',     
+        alignItems: 'stretch',    
+        height: '100vh', 
+        width: '100%',            // FIX: Using 100% instead of 100vw prevents right-edge clipping
+        maxWidth: 'none',         
+        margin: 0,                
+        padding: '40px 56px 40px 40px', // FIX: Added extra padding on the right side
+        gap: '56px',              // FIX: Increased gap between History and Drag&Drop
+        boxSizing: 'border-box',
+        overflow: 'hidden'        
+      }}>
+        
+        {/* === LEFT COLUMN: RECENT FILES === */}
+        {currentUser && (
+          <div style={{ 
+            flex: '0 0 300px', 
+            background: '#1e293b', 
+            padding: '24px', 
+            borderRadius: '12px', 
+            border: '1px solid #334155', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: '100%', 
+            boxSizing: 'border-box'
+          }}>
+            <h3 style={{ marginTop: 0, marginBottom: 16, color: '#f8fafc', fontSize: 18, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <Undo size={18} /> Recent Files
+            </h3>
+            {userHistory.length === 0
+              ? <div style={{ color: '#64748b', fontSize: 14, fontStyle: 'italic' }}>No history yet.</div>
+              : <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', paddingRight: 4, flex: 1 }}> 
+                {userHistory.map(item => (
+                  <div key={item.id} onClick={() => handleHistoryItemClick(item)}
+                    style={{ 
+                      background: '#0f172a', padding: 12, borderRadius: 8, cursor: 'pointer', 
+                      border: '1px solid transparent', transition: 'all 0.2s',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = '#8b5cf6'}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}>
+                    
+                    <div style={{ overflow: 'hidden' }}>
                       <div style={{ color: '#e2e8f0', fontWeight: 500, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.filename}</div>
                       <div style={{ color: '#64748b', fontSize: 12, marginTop: 4 }}>{new Date(item.created_at).toLocaleString()}</div>
                     </div>
-                  ))}
-                </div>
-              }
-            </div>
-          )}
-          <div style={{ flex: 1 }}>
-            <DragAndDrop onFileAccepted={handleFileAccepted} />
-            {isLoading && <div className="loading-indicator">Processing file…</div>}
+
+                    <button 
+                      onClick={(e) => deleteHistoryItem(e, item.id)}
+                      style={{
+                        background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer',
+                        padding: '6px', borderRadius: '4px', display: 'flex', flexShrink: 0
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = '#64748b'; e.currentTarget.style.background = 'transparent'; }}
+                      title="Delete project"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            }
           </div>
+        )}
+
+        {/* === RIGHT COLUMN: HEADER & DRAG/DROP === */}
+        <div style={{ 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '32px',
+          height: '100%',
+          minWidth: 0 
+        }}>
+          
+          {/* HEADER */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexShrink: 0 }}>
+            {currentUser ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>Welcome, <strong>{currentUser.username}</strong>!</span>
+                <button onClick={async () => {
+                  try { await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }) } catch { }
+                  localStorage.removeItem('accessToken')
+                  sessionStorage.removeItem('accessToken')
+                  setCurrentUser(null); setAccessToken(null); setUserHistory([])
+                }} style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', marginLeft: 12 }}>
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <LoginButtons onLogin={() => setAuthModalMode('login')} onSignup={() => setAuthModalMode('signup')} />
+            )}
+          </div>
+
+          {/* DRAG AND DROP */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%' }}>
+            <div style={{ flex: 1, width: '100%', display: 'flex' }}>
+              <div style={{ width: '100%', height: '100%' }}>
+                <DragAndDrop onFileAccepted={handleFileAccepted} />
+              </div>
+            </div>
+            {isLoading && <div className="loading-indicator" style={{ marginTop: '16px', textAlign: 'center' }}>Processing file…</div>}
+          </div>
+
         </div>
 
+        {/* Auth Modal Overlay */}
         {authModalMode && (
           <AuthModal initialMode={authModalMode} onClose={() => setAuthModalMode(null)} onSuccess={(u, t) => { setCurrentUser(u); setAccessToken(t); setAuthModalMode(null) }} />
         )}

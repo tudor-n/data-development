@@ -17,34 +17,18 @@ function cellStyle(value) {
 
 /* ─── ReasonBadge ──────────────────────────────────────────────────────────── */
 function ReasonBadge({ reason }) {
-  const [expanded, setExpanded] = useState(false)
   const parts = reason ? reason.split(';').map(r => r.trim()).filter(Boolean) : []
-  const preview = parts[0] || '—'
   return (
-    <div style={{ maxWidth: 280 }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: parts.length > 1 ? 'pointer' : 'default' }}
-        onClick={() => parts.length > 1 && setExpanded(e => !e)}
-      >
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: 4,
-          background: 'rgba(239,68,68,0.12)', color: '#fca5a5',
-          fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 12,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240,
-        }}>
-          <AlertTriangle size={9} /> {preview}
-        </span>
-        {parts.length > 1 && (
-          expanded ? <ChevronUp size={11} color="#64748b" /> : <ChevronDown size={11} color="#64748b" />
-        )}
-      </div>
-      {expanded && parts.slice(1).map((p, i) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: 350 }}>
+      {parts.map((p, i) => (
         <div key={i} style={{
-          marginTop: 3,
+          display: 'flex', alignItems: 'flex-start', gap: 6,
           background: 'rgba(239,68,68,0.08)', color: '#fca5a5',
-          fontSize: 10, padding: '2px 7px', borderRadius: 8,
+          fontSize: 11, padding: '6px 8px', borderRadius: 6,
+          lineHeight: '1.4', whiteSpace: 'normal', // Allows text to wrap nicely
         }}>
-          {p}
+          <AlertTriangle size={12} style={{ marginTop: '2px', flexShrink: 0 }} /> 
+          <span>{p}</span>
         </div>
       ))}
     </div>
@@ -263,9 +247,13 @@ const thStyle = {
 }
 
 const tdStyle = {
-  padding: '4px 10px',
-  borderBottom: '1px solid rgba(255,255,255,0.04)',
-  maxWidth: 200, overflow: 'hidden',
-  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-  verticalAlign: 'middle',
+  padding: '10px 12px', // Increased padding for breathability
+  borderBottom: '1px solid rgba(255,255,255,0.06)',
+  maxWidth: 250, 
+  overflow: 'hidden',
+  textOverflow: 'ellipsis', 
+  // Change to 'normal' to allow wrapping, or keep 'nowrap' if you prefer a strict grid
+  whiteSpace: 'normal', 
+  verticalAlign: 'top', // Align to top because reason badges might be tall
+  lineHeight: '1.5',
 }

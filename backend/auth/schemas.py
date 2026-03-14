@@ -25,6 +25,10 @@ class RegisterRequest(BaseModel):
     def password_strength(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters")
+        if not any(char.isdigit() for char in v):
+            raise ValueError("Password must contain at least one number")
+        if not any(not char.isalnum() for char in v):
+             raise ValueError("Password must contain at least one special character")
         return v
 
     @model_validator(mode="after")
