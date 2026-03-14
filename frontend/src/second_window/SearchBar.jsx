@@ -1,27 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { Search, X, Clock } from 'lucide-react'
 import './SearchBar.css'
 
-const STORAGE_KEY = 'clarifi_search_history'
 const MAX_HISTORY = 10
 const BLUR_DELAY_MS = 150
 
-function loadHistory() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') }
-  catch { return [] }
-}
-
-function persistHistory(items) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
-}
-
 export default function SearchBar({ onSearch }) {
-  const [query, setQuery] = useState('')
-  const [history, setHistory] = useState(loadHistory)
+  const [query, setQuery]       = useState('')
+  const [history, setHistory]   = useState([])
   const [showDrop, setShowDrop] = useState(false)
-  const inputRef = useRef(null)
-  const wrapRef = useRef(null)
-  const timerRef = useRef(null)
+  const inputRef  = useRef(null)
+  const wrapRef   = useRef(null)
+  const timerRef  = useRef(null)
 
   useEffect(() => {
     const handler = (e) => {
@@ -40,13 +30,11 @@ export default function SearchBar({ onSearch }) {
   }
 
   const addToHistory = useCallback((q) => {
-    if (!q.trim()) return
     const trimmed = q.trim()
-    setHistory((prev) => {
-      const updated = [{ id: Date.now(), query: trimmed }, ...prev.filter((h) => h.query !== trimmed)].slice(0, MAX_HISTORY)
-      persistHistory(updated)
-      return updated
-    })
+    if (!trimmed) return
+    setHistory(prev =>
+      [{ id: Date.now(), query: trimmed }, ...prev.filter(h => h.query !== trimmed)].slice(0, MAX_HISTORY)
+    )
   }, [])
 
   const handleKeyDown = (e) => {
@@ -73,11 +61,7 @@ export default function SearchBar({ onSearch }) {
 
   const deleteHistoryItem = (e, item) => {
     e.stopPropagation()
-    setHistory((prev) => {
-      const updated = prev.filter((h) => h.id !== item.id)
-      persistHistory(updated)
-      return updated
-    })
+    setHistory(prev => prev.filter(h => h.id !== item.id))
   }
 
   return (

@@ -15,41 +15,6 @@ import './App.css'
 
 const API_BASE = '/api/v1'
 
-/* ─── CSV helpers ──────────────────────────────────────────────────────────── */
-function parseCSV(csv) {
-  const normalized = csv.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const lines = []
-  let current = '', inQuotes = false
-  for (let i = 0; i < normalized.length; i++) {
-    const char = normalized[i], next = normalized[i + 1]
-    if (char === '"') {
-      if (inQuotes && next === '"') { current += '"'; i++ }
-      else inQuotes = !inQuotes
-    } else if (char === '\n' && !inQuotes) {
-      if (current.trim()) lines.push(current)
-      current = ''
-    } else { current += char }
-  }
-  if (current.trim()) lines.push(current)
-  return lines
-}
-
-function parseCSVLine(line) {
-  const fields = []
-  let current = '', inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i], next = line[i + 1]
-    if (char === '"') {
-      if (inQuotes && next === '"') { current += '"'; i++ }
-      else inQuotes = !inQuotes
-    } else if (char === ',' && !inQuotes) {
-      fields.push(current); current = ''
-    } else { current += char }
-  }
-  fields.push(current)
-  return fields.map(f => f.replace(/^"|"$/g, '').trim())
-}
-
 function encodeCSVLine(fields) {
   return fields.map(f => {
     const s = String(f || '')
@@ -65,7 +30,6 @@ function triggerDownload(content, filename, mimeType = 'text/csv;charset=utf-8;'
   document.body.removeChild(a); URL.revokeObjectURL(url)
 }
 
-/* ─── Sheet Tab component ──────────────────────────────────────────────────── */
 function SheetTab({ label, count, active, variant = 'clean', onClick }) {
   const colors = {
     clean:      { active: '#10b981', inactive: '#475569', bg: 'rgba(16,185,129,0.12)' },
@@ -106,7 +70,6 @@ function SheetTab({ label, count, active, variant = 'clean', onClick }) {
   )
 }
 
-/* ─── App ──────────────────────────────────────────────────────────────────── */
 export default function App() {
   const [step, setStep]                 = useState('upload')
   const [csvRows, setCsvRows]           = useState([])
@@ -124,13 +87,11 @@ export default function App() {
   const [isAnimatingScore, setIsAnimatingScore] = useState(false)
   const [searchQuery, setSearchQuery]   = useState('')
 
-  // Sheet / quarantine state
-  const [activeTab, setActiveTab]             = useState('clean')  // 'clean' | 'quarantine'
+  const [activeTab, setActiveTab]             = useState('clean')
   const [quarantineRows, setQuarantineRows]   = useState([])
   const [quarantineHeaders, setQuarantineHeaders] = useState([])
   const [quarantineCSV, setQuarantineCSV]     = useState('')
 
-  // Auth
   const [currentUser, setCurrentUser]     = useState(null)
   const [accessToken, setAccessToken]     = useState(null)
   const [authModalMode, setAuthModalMode] = useState(null)
@@ -138,7 +99,6 @@ export default function App() {
 
   const authHeaders = useCallback(t => t ? { Authorization: `Bearer ${t}` } : {}, [])
 
-  /* ── session restore ─────────────────────────────────────────────────────── */
   useEffect(() => {
     const tryRefresh = async () => {
       try {
@@ -177,7 +137,6 @@ export default function App() {
     } catch { /**/ }
   }, [accessToken, authHeaders, fetchUserHistory])
 
-  /* ── undo / redo ─────────────────────────────────────────────────────────── */
   const pushHistory = useCallback((rows, hist, idx) => {
     const newHist = hist.slice(0, idx + 1)
     newHist.push(rows)
@@ -186,85 +145,71 @@ export default function App() {
 
   const handleUndo = () => {
     if (historyIndex > 0) {
-      const i = historyIndex - 1; setHistoryIndex(i); setCsvRows(history[i]); setHasUnsavedEdits(true)
-    }
-  }
-  const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
-      const i = historyIndex + 1; setHistoryIndex(i); setCsvRows(history[i]); setHasUnsavedEdits(true)
+      const i = historyIndex - 1
+      setHistoryIndex(i)
+      setCsvRows(history[i])
+      setHasUnsavedEdits(true)
+      setPendingChanges([])
     }
   }
 
-  /* ── CSV reconstruction ──────────────────────────────────────────────────── */
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const i = historyIndex + 1
+      setHistoryIndex(i)
+      setCsvRows(history[i])
+      setHasUnsavedEdits(true)
+      setPendingChanges([])
+    }
+  }
+
   const buildCSVFile = () => {
     const csv = [encodeCSVLine(csvHeaders), ...csvRows.map(r => encodeCSVLine(csvHeaders.map(h => r[h] || '')))].join('\n')
     return { csv, file: new File([new Blob([csv], { type: 'text/csv' })], fileName, { type: 'text/csv' }) }
   }
 
-  /* ── file accepted ───────────────────────────────────────────────────────── */
+  const resetQuarantine = () => {
+    setQuarantineRows([]); setQuarantineHeaders([]); setQuarantineCSV(''); setActiveTab('clean')
+  }
+
   const handleFileAccepted = async (fileOrContent, name, fromHistory = false) => {
     setIsLoading(true)
-    const resetQuarantine = () => {
-      setQuarantineRows([]); setQuarantineHeaders([]); setQuarantineCSV(''); setActiveTab('clean')
-    }
     try {
-      const ext   = name.split('.').pop().toLowerCase()
-      const isCsv = ext === 'csv'
-
-      const applyParsed = (headers, rows, csvText) => {
-        setCsvHeaders(headers); setCsvRows(rows)
-        setHistory([rows]); setHistoryIndex(0)
-        setFileName(name); setPendingChanges([])
-        resetQuarantine(); setStep('preview')
-        if (!fromHistory) saveToHistory(name, csvText, rows.length, headers.length)
-      }
-
+      let fileToUpload
       if (typeof fileOrContent === 'string') {
-        const lines = parseCSV(fileOrContent)
-        if (!lines.length) { alert('File is empty'); return }
-        const headers = parseCSVLine(lines[0])
-        const rows = lines.slice(1).map(line => {
-          const vals = parseCSVLine(line); const obj = {}
-          headers.forEach((h, i) => { obj[h] = vals[i] || '' }); return obj
-        })
-        applyParsed(headers, rows, fileOrContent)
-        try {
-          const fd = new FormData()
-          fd.append('file', new File([fileOrContent], name, { type: 'text/csv' }))
-          const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd })
-          if (res.ok) setAnalysisData(await res.json())
-        } catch { /**/ }
-        return
+        fileToUpload = new File([fileOrContent], name, { type: 'text/csv' })
+      } else {
+        fileToUpload = fileOrContent
       }
 
-      if (isCsv) {
-        const text    = await fileOrContent.text()
-        const lines   = parseCSV(text)
-        if (!lines.length) { alert('CSV file is empty'); return }
-        const headers = parseCSVLine(lines[0])
-        const rows = lines.slice(1).map(line => {
-          const vals = parseCSVLine(line); const obj = {}
-          headers.forEach((h, i) => { obj[h] = vals[i] || '' }); return obj
-        })
-        applyParsed(headers, rows, text)
-        try {
-          const fd = new FormData(); fd.append('file', fileOrContent)
-          const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd })
-          if (res.ok) setAnalysisData(await res.json())
-        } catch { /**/ }
-      } else {
-        const fd = new FormData(); fd.append('file', fileOrContent)
-        const parseRes = await fetch(`${API_BASE}/parse`, { method: 'POST', body: fd })
-        if (!parseRes.ok) throw new Error(`Parse error: ${await parseRes.text()}`)
-        const { headers, rows } = await parseRes.json()
-        if (!headers?.length) { alert('File is empty or could not be parsed'); return }
-        applyParsed(headers, rows, '')
-        try {
-          const fd2 = new FormData(); fd2.append('file', fileOrContent)
-          const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd2 })
-          if (res.ok) setAnalysisData(await res.json())
-        } catch { /**/ }
+      const fd = new FormData()
+      fd.append('file', fileToUpload)
+      const parseRes = await fetch(`${API_BASE}/parse`, { method: 'POST', body: fd })
+      if (!parseRes.ok) throw new Error(`Parse error: ${await parseRes.text()}`)
+      const { headers, rows } = await parseRes.json()
+
+      if (!headers?.length) { alert('File is empty or could not be parsed'); return }
+
+      setCsvHeaders(headers)
+      setCsvRows(rows)
+      setHistory([rows])
+      setHistoryIndex(0)
+      setFileName(name)
+      setPendingChanges([])
+      resetQuarantine()
+      setStep('preview')
+
+      if (!fromHistory) {
+        const rawContent = typeof fileOrContent === 'string' ? fileOrContent : ''
+        saveToHistory(name, rawContent, rows.length, headers.length)
       }
+
+      try {
+        const fd2 = new FormData()
+        fd2.append('file', fileToUpload)
+        const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd2 })
+        if (res.ok) setAnalysisData(await res.json())
+      } catch { /**/ }
     } catch (err) {
       alert('Error: ' + err.message)
     } finally { setIsLoading(false) }
@@ -289,7 +234,6 @@ export default function App() {
     setActiveTab('clean'); setIsAnimatingScore(false)
   }
 
-  /* ── cell edit ───────────────────────────────────────────────────────────── */
   const handleCellEdit = (rowIndex, col, newValue) => {
     const updated = [...csvRows]
     updated[rowIndex] = { ...updated[rowIndex], [col]: newValue }
@@ -304,7 +248,6 @@ export default function App() {
     setQuarantineRows(updated)
   }
 
-  /* ── re-analyse ──────────────────────────────────────────────────────────── */
   const handleReAnalyze = async () => {
     setIsLoading(true)
     try {
@@ -318,7 +261,6 @@ export default function App() {
     } catch (err) { alert('Error: ' + err.message) } finally { setIsLoading(false) }
   }
 
-  /* ── AUTO-FIX ────────────────────────────────────────────────────────────── */
   const handleAutoFix = async () => {
     setIsFixing(true); setIsAnimatingScore(true)
     const preFixScore = analysisData?.overall_quality_score ?? null
@@ -329,38 +271,32 @@ export default function App() {
       if (!res.ok) throw new Error(`Backend error: ${res.status} – ${await res.text()}`)
 
       const {
-        cleaned_csv, changes,
-        quarantine_csv, quarantine_count,
+        headers: newHeaders,
+        rows:    newRows,
+        changes,
+        quarantine_count,
         quarantine_headers: qHeaders,
         quarantine_rows:    qRows,
+        quarantine_csv,
       } = await res.json()
 
-      // Apply clean rows
-      const lines      = parseCSV(cleaned_csv)
-      if (!lines.length) throw new Error('Empty response from server')
-      const newHeaders = parseCSVLine(lines[0])
-      const newRows    = lines.slice(1).map(line => {
-        const vals = parseCSVLine(line); const obj = {}
-        newHeaders.forEach((h, i) => { obj[h] = vals[i] || '' }); return obj
-      })
-      setCsvHeaders(newHeaders); setCsvRows(newRows)
+      setCsvHeaders(newHeaders)
+      setCsvRows(newRows)
       setPendingChanges(changes || [])
       const { newHist, newIdx } = pushHistory(newRows, history, historyIndex)
       setHistory(newHist); setHistoryIndex(newIdx)
 
-      // Apply quarantine
       const hasQuarantine = quarantine_count > 0
       setQuarantineRows(qRows || [])
       setQuarantineHeaders(qHeaders || [])
       setQuarantineCSV(quarantine_csv || '')
 
-      // Auto-switch to quarantine tab if there are quarantined rows
       if (hasQuarantine) setActiveTab('quarantine')
 
-      // Re-analyse clean output
       try {
+        const cleanedCsv = [encodeCSVLine(newHeaders), ...newRows.map(r => encodeCSVLine(newHeaders.map(h => r[h] || '')))].join('\n')
         const cfd = new FormData()
-        cfd.append('file', new File([new Blob([cleaned_csv], { type: 'text/csv' })], fileName, { type: 'text/csv' }))
+        cfd.append('file', new File([new Blob([cleanedCsv], { type: 'text/csv' })], fileName, { type: 'text/csv' }))
         const ar = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: cfd })
         if (ar.ok) {
           setAnalysisData(await ar.json()); setOriginalScore(preFixScore)
@@ -372,7 +308,6 @@ export default function App() {
     } finally { setIsFixing(false) }
   }
 
-  /* ── MERGE operations ────────────────────────────────────────────────────── */
   const _stripInternalCols = (row) => {
     const clean = { ...row }
     delete clean._row_id
@@ -402,7 +337,6 @@ export default function App() {
     setHistory(newHist); setHistoryIndex(newIdx)
     setQuarantineRows(remaining)
 
-    // Rebuild quarantine CSV from remaining
     if (remaining.length > 0) {
       const dataHeaders = quarantineHeaders.filter(h => h !== '_row_id')
       const csv = [
@@ -415,7 +349,6 @@ export default function App() {
     }
   }, [csvRows, quarantineRows, quarantineHeaders, history, historyIndex, pushHistory])
 
-  /* ── change acceptance ───────────────────────────────────────────────────── */
   const handleAcceptChange = useCallback((change) => {
     if (change.kind === 'critical' || change.new_value === '') {
       setPendingChanges(prev => prev.filter(c => !(c.row === change.row && c.column === change.column)))
@@ -463,7 +396,6 @@ export default function App() {
     setHistory(newHist); setHistoryIndex(newIdx); setPendingChanges([])
   }, [csvRows, history, historyIndex, pushHistory, pendingChanges])
 
-  /* ── exports ─────────────────────────────────────────────────────────────── */
   const handleExportClean = () => {
     const { csv } = buildCSVFile()
     triggerDownload('\ufeff' + csv, `Clean_${fileName}`)
@@ -475,10 +407,7 @@ export default function App() {
   }
 
   const handleExportFull = () => {
-    // Combine clean + quarantine rows (strip internal cols from quarantine)
-    const qDataHeaders = quarantineHeaders.filter(h => h !== '_row_id' && h !== '_issue_reason')
-    const allHeaders   = csvHeaders  // assume same schema
-
+    const allHeaders = csvHeaders
     const cleanLines = csvRows.map(r => encodeCSVLine(allHeaders.map(h => r[h] || '')))
     const qLines = quarantineRows.map(r => {
       const clean = _stripInternalCols(r)
@@ -495,9 +424,6 @@ export default function App() {
     setHasUnsavedEdits(false)
   }
 
-  /* ─────────────────────────────────────────────────────────────────────────── */
-  /*  UPLOAD SCREEN                                                               */
-  /* ─────────────────────────────────────────────────────────────────────────── */
   if (step === 'upload') {
     return (
       <div className="app-page">
@@ -552,15 +478,10 @@ export default function App() {
     )
   }
 
-  /* ─────────────────────────────────────────────────────────────────────────── */
-  /*  PREVIEW / EDITOR SCREEN                                                     */
-  /* ─────────────────────────────────────────────────────────────────────────── */
   const quarantineCount = quarantineRows.length
 
   return (
     <div className="app-page preview-page">
-
-      {/* ── topbar ─────────────────────────────────────────────────────────── */}
       <div className="preview-topbar">
         <button className="back-btn" onClick={handleBack}><ArrowLeft size={18} /> Back</button>
         <h1 className="preview-title">Clarifi.ai</h1>
@@ -570,7 +491,6 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'center' }}>
-          {/* undo / redo */}
           <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,0.05)', padding: 4, borderRadius: 8 }}>
             <button onClick={handleUndo} disabled={historyIndex <= 0} title="Undo"
               style={{ background: 'transparent', border: 'none', color: historyIndex > 0 ? '#e2e8f0' : '#475569', cursor: historyIndex > 0 ? 'pointer' : 'not-allowed', padding: '4px 8px' }}>
@@ -582,21 +502,18 @@ export default function App() {
             </button>
           </div>
 
-          {/* auto-fix */}
           <button onClick={handleAutoFix} disabled={isFixing || isLoading}
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1px solid #8b5cf6', cursor: (isFixing || isLoading) ? 'not-allowed' : 'pointer', fontWeight: 'bold', background: 'rgba(139,92,246,0.1)', color: '#c4b5fd', transition: 'all 0.2s' }}>
             <Wand2 size={16} className={isFixing ? 'spin' : ''} />
             {isFixing ? 'Fixing…' : 'Auto-Fix All'}
           </button>
 
-          {/* re-analyse */}
           <button onClick={handleReAnalyze} disabled={isLoading || isFixing}
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: 'none', cursor: (isLoading || isFixing) ? 'not-allowed' : 'pointer', fontWeight: 'bold', background: hasUnsavedEdits ? '#3b82f6' : 'rgba(255,255,255,0.1)', color: hasUnsavedEdits ? '#fff' : '#94a3b8', transition: 'all 0.2s' }}>
             <Redo size={16} className={isLoading ? 'spin' : ''} />
             {isLoading ? 'Analysing…' : 'Re-Analyse'}
           </button>
 
-          {/* save */}
           {currentUser && (
             <button onClick={handleSaveCurrentToHistory} disabled={isLoading || isFixing}
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1px solid #f59e0b', cursor: (isLoading || isFixing) ? 'not-allowed' : 'pointer', fontWeight: 'bold', background: hasUnsavedEdits ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', color: hasUnsavedEdits ? '#fbbf24' : '#94a3b8' }}>
@@ -605,7 +522,6 @@ export default function App() {
             </button>
           )}
 
-          {/* export dropdown zone */}
           <div style={{ display: 'flex', gap: 6 }}>
             <button onClick={handleExportClean}
               style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 'bold', background: '#10b981', color: '#fff', fontSize: 12 }}>
@@ -627,7 +543,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── sheet tabs (Excel-style) ─────────────────────────────────────────── */}
       <div style={{
         display: 'flex', alignItems: 'flex-end', gap: 0,
         paddingLeft: 20, paddingRight: 20, paddingTop: 8,
@@ -656,10 +571,7 @@ export default function App() {
         )}
       </div>
 
-      {/* ── body ────────────────────────────────────────────────────────────── */}
       <div className="preview-body">
-
-        {/* table / quarantine area */}
         <div className="preview-table-area">
           <div style={{ textAlign: 'center', fontSize: 12, color: '#475569', fontWeight: 600, marginBottom: 8, letterSpacing: '0.3px' }}>
             {activeTab === 'clean'
@@ -691,7 +603,6 @@ export default function App() {
           )}
         </div>
 
-        {/* sidebar */}
         <div className="preview-sidebar-area">
           <InfoPanel
             fileName={fileName}
