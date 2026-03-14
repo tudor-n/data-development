@@ -1,18 +1,16 @@
 from __future__ import annotations
- 
+
 import logging
 import re
 from datetime import datetime
 from typing import Optional
- 
+
 import polars as pl
- 
+
 logger = logging.getLogger(__name__)
- 
-# ── Column classification ─────────────────────────────────────────────────────
- 
+
 EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
- 
+
 DATE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^\d{4}-\d{2}-\d{2}$"),   "%Y-%m-%d"),
     (re.compile(r"^\d{2}/\d{2}/\d{4}$"),   "%m/%d/%Y"),
@@ -20,7 +18,7 @@ DATE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^\d{2}\.\d{2}\.\d{4}$"), "%d.%m.%Y"),
     (re.compile(r"^\d{4}/\d{2}/\d{2}$"),   "%Y/%m/%d"),
 ]
- 
+
 CRITICAL_COLS = frozenset({
     "rating", "performance_rating", "score", "grade", "review",
     "eval", "evaluation", "stars", "salary", "compensation", "pay",
@@ -36,7 +34,7 @@ DATE_COLS   = frozenset({
     "join_date", "created_at", "updated_at", "termination_date",
 })
 PHONE_COLS  = frozenset({"phone", "telephone", "mobile", "cell", "phone_number", "contact"})
- 
+
 RATING_MAP: dict[str, float] = {
     "excellent": 5.0, "outstanding": 5.0, "exceptional": 5.0,
     "very good": 4.5, "above average": 4.5, "superior": 4.5,
@@ -48,19 +46,18 @@ RATING_MAP: dict[str, float] = {
     "unsatisfactory": 1.5,    "unacceptable": 1.5,
     "failing": 1.0,   "critical": 1.0,
 }
-# Inverse map: numeric → closest label (for num → text inference)
 _RATING_NUM_MAP: list[tuple[float, str]] = sorted(
     {v: k.title() for k, v in RATING_MAP.items()}.items()
 )
- 
+
 BOOLEAN_TRUE  = frozenset({"yes", "y", "true",  "1", "t", "on",  "active",   "enabled"})
 BOOLEAN_FALSE = frozenset({"no",  "n", "false", "0", "f", "off", "inactive", "disabled"})
- 
+
 NULL_SENTINELS = frozenset({
     "", "null", "none", "n/a", "na", "nan", "-", "--",
     "missing", "undefined", "unknown", "nil", "tbd",
 })
- 
+
 COMMON_DOMAIN_FIXES: dict[str, str] = {
     "gmial.com": "gmail.com",   "gmal.com":    "gmail.com",
     "gmaill.com": "gmail.com",  "gamil.com":   "gmail.com",
@@ -71,18 +68,31 @@ COMMON_DOMAIN_FIXES: dict[str, str] = {
     "outlok.com": "outlook.com","outllook.com": "outlook.com",
     "outlook.con": "outlook.com",
 }
- 
-# Placeholder shown in quarantine output for unfixable empty cells
+
 TO_BE_DETERMINED = "TO_BE_DETERMINED"
- 
+
 _PHONE_DIGITS = re.compile(r"\d")
 _CURRENCY_RE  = re.compile(r"^[\$€£¥₹]?\s*([\d,]+\.?\d*)\s*$")
- 
+
+_NAME_PARTICLES = frozenset({
+    "van", "de", "der", "den", "von", "del", "di", "da",
+    "la", "le", "les", "du", "des", "al", "el", "bin", "binti",
+})
+
 QuarantineReasons = dict[int, list[str]]
- 
- 
-# ── Helpers ───────────────────────────────────────────────────────────────────
- 
+
+
+def _smart_title(s: str) -> str:
+    words = s.split()
+    out = []
+    for i, w in enumerate(words):
+        if i > 0 and w.lower() in _NAME_PARTICLES:
+            out.append(w.lower())
+        else:
+            out.append(w.capitalize())
+    return " ".join(out)
+
+
 def _col_type(col: str) -> str:
     c = col.lower().replace(" ", "_").strip()
     if c in ID_COLS or c.endswith("_id"):
@@ -98,8 +108,8 @@ def _col_type(col: str) -> str:
     if c in PHONE_COLS or any(k in c for k in PHONE_COLS):
         return "phone"
     return "generic"
- 
- 
+
+
 def _rec(changes, row, col, old, new, kind, reason):
     changes.append({
         "row":       int(row),
@@ -109,12 +119,12 @@ def _rec(changes, row, col, old, new, kind, reason):
         "kind":      kind,
         "reason":    reason,
     })
- 
- 
+
+
 def _quarantine(qr: QuarantineReasons, row_id: int, reason: str) -> None:
     qr.setdefault(row_id, []).append(reason)
- 
- 
+
+
 def _detect_dominant_date_format(values: list[str]) -> Optional[str]:
     counts: dict[str, int] = {}
     for v in values:
@@ -126,8 +136,8 @@ def _detect_dominant_date_format(values: list[str]) -> Optional[str]:
                 counts[fmt] = counts.get(fmt, 0) + 1
                 break
     return max(counts, key=counts.get) if counts else None
- 
- 
+
+
 def _is_numeric_col(col: pl.Series) -> bool:
     native = (
         pl.Float32, pl.Float64,
@@ -143,57 +153,37 @@ def _is_numeric_col(col: pl.Series) -> bool:
         return False
     ratio = non_null.cast(pl.Float64, strict=False).drop_nulls().len() / non_null.len()
     return ratio > 0.6
- 
- 
+
+
 def _closest_rating_label(numeric: float) -> str:
-    """Return the closest RATING_MAP label for a given numeric value."""
     best_label, best_dist = "Average", float("inf")
     for val, label in _RATING_NUM_MAP:
         d = abs(val - numeric)
         if d < best_dist:
             best_dist, best_label = d, label
     return best_label
- 
- 
-# ── Cross-column inference helpers ────────────────────────────────────────────
- 
+
+
 def _detect_email_naming_pattern(
     pairs: list[tuple[str, str]],
 ) -> Optional[dict]:
-    """
-    Detect the email-construction convention from (email, name) pairs.
- 
-    Supports patterns:
-        first.last     john.robertson@…
-        first.linit    john.r@…
-        finit.last     j.robertson@…
-        last.first     robertson.john@…
-        last.finit     robertson.j@…
-        first          john@…
- 
-    Also detects whether names are stored as "First Last" or "Last First".
- 
-    Returns dict with keys: pattern, name_order, domain, confidence
-    or None if no clear pattern found.
-    """
     votes: dict[tuple[str, str], int] = {}
     domain: Optional[str] = None
- 
+
     for email, name in pairs:
         if not email or not name or "@" not in email:
             continue
- 
+
         prefix_raw, dom = email.rsplit("@", 1)
         prefix = prefix_raw.lower().strip(".")
         if domain is None:
             domain = dom
- 
+
         clean_name = name.replace(",", " ").strip()
         parts = [p for p in clean_name.split() if p]
         if len(parts) < 2:
             continue
- 
-        # Try both orderings of the first and last tokens
+
         for name_order, (first, last) in [
             ("first_last", (parts[0],  parts[-1])),
             ("last_first", (parts[-1], parts[0])),
@@ -211,18 +201,17 @@ def _detect_email_naming_pattern(
                 if prefix == candidate:
                     key = (pat, name_order)
                     votes[key] = votes.get(key, 0) + 1
- 
+
     if not votes:
         return None
- 
+
     best_key   = max(votes, key=votes.get)
     best_count = votes[best_key]
     total      = sum(votes.values())
- 
-    # Need at least 2 matching pairs AND >50% agreement
+
     if best_count < 2 or best_count / total < 0.50:
         return None
- 
+
     pattern, name_order = best_key
     return {
         "pattern":    pattern,
@@ -230,24 +219,23 @@ def _detect_email_naming_pattern(
         "domain":     domain,
         "confidence": best_count / total,
     }
- 
- 
+
+
 def _email_from_name(name: str, info: dict) -> Optional[str]:
-    """Generate an email from a full name given pattern info."""
     parts = name.replace(",", " ").split()
     parts = [p for p in parts if p]
     if len(parts) < 2:
         return None
- 
+
     if info["name_order"] == "first_last":
         first, last = parts[0], parts[-1]
-    else:  # last_first
+    else:
         last, first = parts[0], parts[-1]
- 
+
     f, l   = first.lower(), last.lower()
     domain = info["domain"]
     pat    = info["pattern"]
- 
+
     prefix = {
         "first.last":  f"{f}.{l}",
         "first.linit": f"{f}.{l[0]}",
@@ -256,31 +244,30 @@ def _email_from_name(name: str, info: dict) -> Optional[str]:
         "last.finit":  f"{l}.{f[0]}",
         "first":       f,
     }.get(pat)
- 
+
     return f"{prefix}@{domain}" if prefix else None
- 
- 
+
+
 def _name_from_email(email: str, info: dict) -> Optional[str]:
-    """Reconstruct a person's name from their email given pattern info."""
     if "@" not in email:
         return None
- 
+
     prefix = email.rsplit("@", 1)[0].lower().strip(".")
     pat    = info["pattern"]
- 
+
     first: Optional[str] = None
     last:  Optional[str] = None
- 
+
     if pat == "first.last" and "." in prefix:
         parts = prefix.split(".", 1)
         first, last = parts[0], parts[1]
     elif pat == "first.linit" and "." in prefix:
         parts = prefix.split(".", 1)
         first = parts[0]
-        last  = None  # can only infer first initial of last name — not enough
+        last  = None
     elif pat == "finit.last" and "." in prefix:
         parts = prefix.split(".", 1)
-        first = None  # only first initial
+        first = None
         last  = parts[1]
     elif pat == "last.first" and "." in prefix:
         parts = prefix.split(".", 1)
@@ -291,24 +278,18 @@ def _name_from_email(email: str, info: dict) -> Optional[str]:
         first = None
     elif pat == "first":
         first = prefix
- 
-    if not first and not last:
-        return None
- 
-    # Only reconstruct if we have both components
+
     if not first or not last:
         return None
- 
-    first, last = first.title(), last.title()
- 
+
+    first, last = first.capitalize(), last.capitalize()
+
     if info["name_order"] == "first_last":
         return f"{first} {last}"
     else:
         return f"{last} {first}"
- 
- 
-# ── Fix passes ────────────────────────────────────────────────────────────────
- 
+
+
 def _fix_whitespace(df: pl.DataFrame, ch: list) -> pl.DataFrame:
     str_cols = [c for c in df.columns if df[c].dtype == pl.Utf8 and c != "_row_id"]
     for col_name in str_cols:
@@ -324,8 +305,8 @@ def _fix_whitespace(df: pl.DataFrame, ch: list) -> pl.DataFrame:
             [pl.col(c).str.strip_chars().alias(c) for c in str_cols]
         )
     return df
- 
- 
+
+
 def _fix_null_sentinels(df: pl.DataFrame, ch: list) -> pl.DataFrame:
     str_cols = [c for c in df.columns if df[c].dtype == pl.Utf8 and c != "_row_id"]
     for col_name in str_cols:
@@ -341,8 +322,8 @@ def _fix_null_sentinels(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         if chg:
             df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
     return df
- 
- 
+
+
 def _fix_numeric_strings(df: pl.DataFrame, ch: list) -> pl.DataFrame:
     skip = frozenset({"id", "email", "phone", "date", "name"})
     for col_name in df.columns:
@@ -372,15 +353,9 @@ def _fix_numeric_strings(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         if chg:
             df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
     return df
- 
- 
+
+
 def _fix_ratings(df: pl.DataFrame, ch: list) -> pl.DataFrame:
-    """
-    Bidirectional rating normalisation:
-    • Text in a numeric-named column → numeric  ("Excellent" → "5.0")
-    • Out-of-range numerics clamped to [1.0, 5.0]
-    • (Numeric in a text-named column → label is handled in _fix_type_coerce)
-    """
     rating_kw = ("rating", "performance", "score", "eval", "grade", "stars")
     for col_name in df.columns:
         if col_name == "_row_id":
@@ -425,18 +400,9 @@ def _fix_ratings(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         if chg:
             df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
     return df
- 
- 
+
+
 def _fix_type_coerce(df: pl.DataFrame, ch: list) -> pl.DataFrame:
-    """
-    Semantic type coercion for mixed columns:
-    • A numeric column that contains text labels → convert to numbers
-      using RATING_MAP if the column looks like a rating scale.
-    • A text-label column that contains raw numbers → convert to labels
-      using _closest_rating_label if column name hints at text rating.
-    This is the inverse of _fix_ratings and handles columns named
-    differently (e.g. "performance" holding "4.5" or "status" holding 3).
-    """
     for col_name in df.columns:
         if col_name == "_row_id":
             continue
@@ -446,13 +412,12 @@ def _fix_type_coerce(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         non_null = col.drop_nulls().to_list()
         if len(non_null) < 2:
             continue
- 
+
         num_count  = sum(1 for v in non_null if _is_castable_float(v))
         text_count = sum(1 for v in non_null if v.strip().lower() in RATING_MAP)
- 
+
         total = len(non_null)
- 
-        # Mostly text labels but some numbers — convert numbers to labels
+
         if text_count / total > 0.5 and num_count > 0 and num_count / total < 0.5:
             vals = col.to_list()
             chg  = False
@@ -471,8 +436,7 @@ def _fix_type_coerce(df: pl.DataFrame, ch: list) -> pl.DataFrame:
                         pass
             if chg:
                 df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
- 
-        # Mostly numbers but some text labels — convert labels to numbers
+
         elif num_count / total > 0.5 and text_count > 0 and text_count / total < 0.5:
             vals = col.to_list()
             chg  = False
@@ -490,18 +454,18 @@ def _fix_type_coerce(df: pl.DataFrame, ch: list) -> pl.DataFrame:
                         break
             if chg:
                 df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
- 
+
     return df
- 
- 
+
+
 def _is_castable_float(v: str) -> bool:
     try:
         float(v.strip().replace(",", ""))
         return True
     except (ValueError, AttributeError):
         return False
- 
- 
+
+
 def _fix_dates(df: pl.DataFrame, ch: list) -> pl.DataFrame:
     target_fmt = "%Y-%m-%d"
     for col_name in df.columns:
@@ -541,8 +505,8 @@ def _fix_dates(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         if chg:
             df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
     return df
- 
- 
+
+
 def _fix_emails(df: pl.DataFrame, ch: list) -> pl.DataFrame:
     for col_name in df.columns:
         if col_name == "_row_id" or _col_type(col_name) != "email":
@@ -569,8 +533,8 @@ def _fix_emails(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         if chg:
             df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
     return df
- 
- 
+
+
 def _fix_phones(df: pl.DataFrame, ch: list) -> pl.DataFrame:
     for col_name in df.columns:
         if col_name == "_row_id" or _col_type(col_name) != "phone":
@@ -597,8 +561,8 @@ def _fix_phones(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         if chg:
             df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
     return df
- 
- 
+
+
 def _fix_booleans(df: pl.DataFrame, ch: list) -> pl.DataFrame:
     for col_name in df.columns:
         if col_name == "_row_id":
@@ -631,40 +595,23 @@ def _fix_booleans(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         if chg:
             df = df.with_columns(pl.Series(col_name, vals, dtype=pl.Utf8))
     return df
- 
- 
-# ── Cross-column inference ────────────────────────────────────────────────────
- 
+
+
 def _fix_cross_column(df: pl.DataFrame, ch: list) -> pl.DataFrame:
-    """
-    Infer missing values using relationships between columns.
- 
-    Supported relationships
-    -----------------------
-    1. Email ↔ Name
-       Scans all (email_col, name_col) pairs, detects the naming convention,
-       then fills missing values in either direction.
- 
-    The fix kind is "fixed" for high-confidence inferences (≥80 %) and
-    "warning" for lower-confidence ones so the UI can show them differently.
-    """
     email_cols = [c for c in df.columns if _col_type(c) == "email"]
     name_cols  = [c for c in df.columns if _col_type(c) == "name"]
- 
+
     if not email_cols or not name_cols:
         return df
- 
-    row_ids: list[int] = df["_row_id"].to_list()
- 
+
     for email_col in email_cols:
         for name_col in name_cols:
             if df[email_col].dtype != pl.Utf8 or df[name_col].dtype != pl.Utf8:
                 continue
- 
+
             emails = df[email_col].to_list()
             names  = df[name_col].to_list()
- 
-            # Collect complete pairs for pattern learning
+
             complete_pairs = [
                 (e, n)
                 for e, n in zip(emails, names)
@@ -672,29 +619,37 @@ def _fix_cross_column(df: pl.DataFrame, ch: list) -> pl.DataFrame:
             ]
             if len(complete_pairs) < 3:
                 continue
- 
+
             pattern_info = _detect_email_naming_pattern(complete_pairs)
             if not pattern_info:
                 continue
- 
+
+            existing_emails = {
+                e for e in emails
+                if e and "@" in e and EMAIL_RE.match(e)
+            }
+
             kind = "fixed" if pattern_info["confidence"] >= 0.80 else "warning"
             new_emails = list(emails)
             new_names  = list(names)
             chg        = False
- 
+
             for i, (email, name) in enumerate(zip(emails, names)):
-                # Missing email, name present → infer email
                 if (not email) and name:
                     inferred = _email_from_name(name, pattern_info)
-                    if inferred and EMAIL_RE.match(inferred):
+                    if (
+                        inferred
+                        and EMAIL_RE.match(inferred)
+                        and inferred not in existing_emails
+                    ):
                         _rec(ch, i, email_col, "", inferred, kind,
                              f"Email inferred from name '{name}' "
                              f"(pattern: {pattern_info['pattern']}, "
                              f"confidence: {pattern_info['confidence']:.0%}).")
                         new_emails[i] = inferred
+                        existing_emails.add(inferred)
                         chg = True
- 
-                # Missing name, email present → infer name
+
                 elif (not name) and email and EMAIL_RE.match(email):
                     inferred = _name_from_email(email, pattern_info)
                     if inferred:
@@ -704,25 +659,23 @@ def _fix_cross_column(df: pl.DataFrame, ch: list) -> pl.DataFrame:
                              f"confidence: {pattern_info['confidence']:.0%}).")
                         new_names[i] = inferred
                         chg = True
- 
+
             if chg:
                 df = df.with_columns([
                     pl.Series(email_col, new_emails, dtype=pl.Utf8),
                     pl.Series(name_col,  new_names,  dtype=pl.Utf8),
                 ])
- 
+
     return df
- 
- 
-# ── Missing value handler ─────────────────────────────────────────────────────
- 
+
+
 def _fix_missing(
     df: pl.DataFrame,
     ch:  list,
     qr:  QuarantineReasons,
 ) -> pl.DataFrame:
     row_ids: list[int] = df["_row_id"].to_list()
- 
+
     for col_name in df.columns:
         if col_name == "_row_id":
             continue
@@ -730,10 +683,9 @@ def _fix_missing(
         null_count = col.null_count()
         if null_count == 0:
             continue
- 
+
         ct = _col_type(col_name)
- 
-        # Identity / date / critical → cannot safely infer → quarantine
+
         if ct in ("id", "name", "email", "phone", "date", "critical"):
             for i in range(df.height):
                 if col[i] is None:
@@ -744,8 +696,7 @@ def _fix_missing(
                     _quarantine(qr, row_ids[i], reason)
                     _rec(ch, i, col_name, "", "", "critical", reason)
             continue
- 
-        # Numeric → fill with median
+
         if _is_numeric_col(col):
             try:
                 numeric  = col.cast(pl.Float64, strict=False)
@@ -769,8 +720,7 @@ def _fix_missing(
                 continue
             except Exception:
                 pass
- 
-        # Text → fill with dominant mode (>40 %) otherwise flag
+
         if col.dtype == pl.Utf8:
             non_null = col.drop_nulls()
             if non_null.len() == 0:
@@ -781,7 +731,7 @@ def _fix_missing(
                 continue
             mode_count = non_null.to_list().count(mode_val)
             mode_ratio = mode_count / non_null.len()
- 
+
             if mode_ratio > 0.40:
                 vals = col.to_list()
                 chg  = False
@@ -803,8 +753,8 @@ def _fix_missing(
                              f"Missing value in '{col_name}': "
                              "no dominant mode — flagged for review.")
     return df
- 
- 
+
+
 def _fix_casing(df: pl.DataFrame, ch: list) -> pl.DataFrame:
     skip_types = frozenset({"id", "email", "date", "phone", "critical"})
     for col_name in df.columns:
@@ -819,25 +769,28 @@ def _fix_casing(df: pl.DataFrame, ch: list) -> pl.DataFrame:
         vals = col.drop_nulls().to_list()
         if len(vals) < 3:
             continue
- 
+
         lower_c = sum(1 for v in vals if v == v.lower() and v != v.upper())
         upper_c = sum(1 for v in vals if v == v.upper() and v != v.lower())
         title_c = sum(1 for v in vals if v == v.title())
         total   = lower_c + upper_c + title_c
         if total == 0:
             continue
- 
+
         max_style = max(lower_c, upper_c, title_c)
         if max_style / total < 0.50 or max_style == total:
             continue
- 
+
         if ct == "name" or max_style == title_c:
-            fn, label = str.title, "Title Case"
+            fn    = _smart_title
+            label = "Title Case"
         elif max_style == lower_c:
-            fn, label = str.lower, "lowercase"
+            fn    = str.lower
+            label = "lowercase"
         else:
-            fn, label = str.upper, "UPPERCASE"
- 
+            fn    = str.upper
+            label = "UPPERCASE"
+
         col_vals = col.to_list()
         chg      = False
         for i, v in enumerate(col_vals):
@@ -854,10 +807,8 @@ def _fix_casing(df: pl.DataFrame, ch: list) -> pl.DataFrame:
                 pl.Series(col_name, col_vals, dtype=pl.Utf8)
             )
     return df
- 
- 
-# ── Post-fix validation ───────────────────────────────────────────────────────
- 
+
+
 def _validate_emails(
     df: pl.DataFrame,
     ch:  list,
@@ -881,36 +832,19 @@ def _validate_emails(
                 )
                 _quarantine(qr, row_ids[i], reason)
                 _rec(ch, i, col_name, v, "", "critical", reason)
- 
- 
-# ── Main entry point ──────────────────────────────────────────────────────────
- 
+
+
 def autofix_dataframe(
     df: pl.DataFrame,
 ) -> tuple[pl.DataFrame, list[dict], pl.DataFrame]:
-    """
-    Run the complete auto-fix pipeline.
- 
-    Returns
-    -------
-    clean_df      — Fixed rows, _row_id stripped.  Ready for downstream use.
-    changes       — Audit log keyed to clean_df row indices.
-    quarantine_df — Rows needing human review.
-                    Retains _row_id (re-merge key).
-                    Adds _issue_reason column.
-                    Unfixable empty cells replaced with TO_BE_DETERMINED.
-    """
-    # Inject stable row IDs
     df = df.with_row_index("_row_id")
- 
-    # Cast content columns to Utf8
+
     content_cols = {c: pl.Utf8 for c in df.columns if c != "_row_id"}
     df = df.cast(content_cols)
- 
+
     ch: list[dict]        = []
     qr: QuarantineReasons = {}
- 
-    # ── Tier 1: deterministic fixes ───────────────────────────────────────────
+
     df = _fix_whitespace(df, ch)
     df = _fix_null_sentinels(df, ch)
     df = _fix_numeric_strings(df, ch)
@@ -920,28 +854,19 @@ def autofix_dataframe(
     df = _fix_emails(df, ch)
     df = _fix_phones(df, ch)
     df = _fix_booleans(df, ch)
- 
-    # ── Tier 2: cross-column inference ────────────────────────────────────────
     df = _fix_cross_column(df, ch)
- 
-    # ── Tier 3: fill remaining missing values / flag for quarantine ───────────
     df = _fix_missing(df, ch, qr)
- 
-    # ── Tier 4: cosmetic normalisation ────────────────────────────────────────
     df = _fix_casing(df, ch)
- 
-    # ── Post-fix validation ───────────────────────────────────────────────────
+
     _validate_emails(df, ch, qr)
- 
-    # ── Split clean vs quarantine ─────────────────────────────────────────────
+
     q_ids = set(qr.keys())
- 
+
     if q_ids:
         q_ids_list    = list(q_ids)
         q_df          = df.filter(pl.col("_row_id").is_in(q_ids_list))
         clean_df_raw  = df.filter(~pl.col("_row_id").is_in(q_ids_list))
- 
-        # Build _issue_reason
+
         reasons = pl.Series(
             "_issue_reason",
             ["; ".join(qr.get(int(rid), ["Unknown issue"]))
@@ -949,8 +874,7 @@ def autofix_dataframe(
             dtype=pl.Utf8,
         )
         quarantine_df = q_df.with_columns(reasons)
- 
-        # Replace unfixable empty cells with TO_BE_DETERMINED
+
         content_q = [
             c for c in quarantine_df.columns
             if c not in ("_row_id", "_issue_reason")
@@ -966,27 +890,24 @@ def autofix_dataframe(
                 )
         if tbd_exprs:
             quarantine_df = quarantine_df.with_columns(tbd_exprs)
- 
+
     else:
         clean_df_raw = df
-        # Return empty quarantine with correct schema
         quarantine_df = df.clear().with_columns(
             pl.lit(None).cast(pl.Utf8).alias("_issue_reason")
         )
- 
-    # ── Remap change rows to clean-output indices ─────────────────────────────
+
     clean_row_ids       = clean_df_raw["_row_id"].to_list()
     row_id_to_clean_idx = {int(rid): idx for idx, rid in enumerate(clean_row_ids)}
- 
+
     display_changes = [
         {**c, "row": row_id_to_clean_idx[c["row"]]}
         for c in ch
         if c["row"] not in q_ids and c["row"] in row_id_to_clean_idx
     ]
- 
-    # Drop _row_id from clean output
+
     clean_df = clean_df_raw.drop("_row_id")
- 
+
     logger.info(
         "Autofix | fixes=%d | clean=%d | quarantine=%d",
         len(ch), clean_df.height, quarantine_df.height,

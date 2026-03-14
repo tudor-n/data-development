@@ -1,7 +1,3 @@
-"""
-Auth router — /auth/register, /auth/login, /auth/refresh, /auth/logout, /auth/me
-Refresh token is stored as an HttpOnly cookie (not in the response body).
-"""
 from datetime import timedelta
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -22,10 +18,10 @@ bearer_scheme = HTTPBearer(auto_error=False)
 COOKIE_NAME = "clarifi_refresh"
 COOKIE_OPTIONS = {
     "httponly": True,
-    "secure": True,       # HTTPS only in production; set False for local dev via env
-    "samesite": "lax",
+    "secure": True,
+    "samesite": "strict",
     "max_age": REFRESH_TOKEN_EXPIRE_DAYS * 86400,
-    "path": "/auth",      # Scope cookie to auth routes only
+    "path": "/auth",
 }
 
 
@@ -42,8 +38,6 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(key=COOKIE_NAME, path="/auth")
 
-
-# ─── Dependencies ────────────────────────────────────────────────────────────
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
@@ -64,8 +58,6 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-
-# ─── Routes ──────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(

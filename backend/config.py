@@ -1,11 +1,6 @@
-"""
-App configuration — reads from environment variables with sane defaults.
-No crash if values are missing; LLM features degrade gracefully.
-"""
 import os
 import secrets
 from functools import lru_cache
-from typing import Annotated
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,18 +11,15 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore",  # ignore unknown env vars — don't crash
+        extra="ignore",
     )
 
-    # Database
     database_url: str = "sqlite+aiosqlite:///./clarifi_dev.db"
 
-    # JWT
-    secret_key: str = secrets.token_urlsafe(32)  # override in production!
+    secret_key: str
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
 
-    # CORS — accepts comma-separated string or Python list
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
     @field_validator("cors_origins", mode="before")
@@ -41,22 +33,24 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
-    # Gemini LLM — optional; features degrade without it
     gemini_api_key: str | None = None
 
     @property
     def llm_enabled(self) -> bool:
         return bool(self.gemini_api_key)
 
-    # Upload limits
     max_file_size_mb: int = 10
     max_rows_for_analysis: int = 50_000
 
-    # Cookies
-    cookie_secure: bool = True  # set to False for local HTTP dev
+    cookie_secure: bool = True
 
-    # Environment
     environment: str = "development"
+
+    allowed_hosts: str = "localhost"
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
 
     @property
     def is_production(self) -> bool:
